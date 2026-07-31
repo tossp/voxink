@@ -14,10 +14,16 @@ var (
 	ErrMissingCapture = errors.New("capture adapter must not be nil")
 	// ErrMissingOverlay reports an incomplete application assembly.
 	ErrMissingOverlay = errors.New("overlay adapter must not be nil")
-	// ErrMissingProviders reports that neither stage-one recognition path exists.
-	ErrMissingProviders = errors.New("at least one ASR provider must be configured")
-	// ErrNoCredentials reports that no runtime provider credentials were supplied.
-	ErrNoCredentials = errors.New("no ASR credentials configured")
+	// ErrMissingLiveRecognizer reports a missing stage-one primary dependency.
+	ErrMissingLiveRecognizer = errors.New("stage-one primary Volcengine live recognizer must not be nil")
+	// ErrMissingBatchTranscriber reports a missing stage-one backup dependency.
+	ErrMissingBatchTranscriber = errors.New("stage-one backup MiMo batch transcriber must not be nil")
+	// ErrNoCredentials reports that neither required stage-one credential set was supplied.
+	ErrNoCredentials = errors.New("stage-one ASR route credentials are not configured")
+	// ErrMissingVolcengineCredentials reports a missing primary credential set.
+	ErrMissingVolcengineCredentials = errors.New("stage-one primary Volcengine credentials are required; configure VOXINK_VOLC_API_KEY and VOXINK_VOLC_RESOURCE_ID, or legacy VOXINK_VOLC_APP_KEY, VOXINK_VOLC_ACCESS_KEY, and VOXINK_VOLC_RESOURCE_ID")
+	// ErrMissingMiMoCredentials reports a missing backup credential set.
+	ErrMissingMiMoCredentials = errors.New("stage-one backup MiMo credentials are required; configure VOXINK_MIMO_API_KEY")
 )
 
 // Capture is the bounded callback boundary owned by the coordinator.
@@ -105,8 +111,11 @@ func NewCoordinator(capture Capture, overlay Overlay, live asr.LiveRecognizer, b
 	if overlay == nil {
 		return nil, ErrMissingOverlay
 	}
-	if live == nil && batch == nil {
-		return nil, ErrMissingProviders
+	if live == nil {
+		return nil, ErrMissingLiveRecognizer
+	}
+	if batch == nil {
+		return nil, ErrMissingBatchTranscriber
 	}
 	if options.NewSessionID == nil {
 		options.NewSessionID = NewSessionID

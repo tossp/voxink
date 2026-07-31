@@ -47,6 +47,20 @@ func TestLiveSuccessWaitsForProtocolTerminalAndSkipsMiMo(t *testing.T) {
 	}
 }
 
+func TestNewCoordinatorRequiresBothStageOneProviders(t *testing.T) {
+	capture := newFakeCapture()
+	overlay := newFakeOverlay()
+	live := newFakeRecognizer(newFakeLiveSession())
+	batch := newFakeTranscriber(nil)
+
+	if _, err := NewCoordinator(capture, overlay, nil, batch, Options{}); !errors.Is(err, ErrMissingLiveRecognizer) {
+		t.Fatalf("missing live error = %v, want %v", err, ErrMissingLiveRecognizer)
+	}
+	if _, err := NewCoordinator(capture, overlay, live, nil, Options{}); !errors.Is(err, ErrMissingBatchTranscriber) {
+		t.Fatalf("missing batch error = %v, want %v", err, ErrMissingBatchTranscriber)
+	}
+}
+
 func TestDialFailureStartsBatchBeforeCaptureStops(t *testing.T) {
 	firstStarted := make(chan struct{})
 	release := make(chan struct{})
@@ -139,7 +153,7 @@ func TestMiMoSegmentFailureEndsFailedWithoutIncompleteFinal(t *testing.T) {
 	batch := newFakeTranscriber(func(context.Context, []byte, int) (string, error) {
 		return "", errors.New("local batch failure")
 	})
-	harness := startHarness(t, nil, batch)
+	harness := startHarness(t, newFakeRecognizer(), batch)
 	defer harness.close(t)
 
 	harness.overlay.toggles <- struct{}{}
@@ -164,7 +178,7 @@ func TestSessionLimitAutomaticallyStopsAndFlushesTail(t *testing.T) {
 		lengths = append(lengths, len(pcm))
 		return string(rune('A' + index)), nil
 	})
-	harness := startHarness(t, nil, batch)
+	harness := startHarness(t, newFakeRecognizer(), batch)
 	defer harness.close(t)
 
 	harness.overlay.toggles <- struct{}{}
@@ -187,7 +201,7 @@ func TestToggleRestartAndCancellationCleanupHaveNoDuplicateFinal(t *testing.T) {
 	second := newFakeLiveSession()
 	third := newFakeLiveSession()
 	recognizer := newFakeRecognizer(first, second, third)
-	harness := startHarness(t, recognizer, nil)
+	harness := startHarness(t, recognizer, newFakeTranscriber(nil))
 
 	for index, live := range []*fakeLiveSession{first, second} {
 		harness.overlay.toggles <- struct{}{}

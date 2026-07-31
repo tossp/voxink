@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tossp/voxink/internal/asr"
 	"github.com/tossp/voxink/internal/platform/windows"
 	"github.com/tossp/voxink/internal/provider/mimo"
 	"github.com/tossp/voxink/internal/provider/volcengine"
@@ -14,31 +13,26 @@ import (
 
 // RunWindows constructs the stage-one Windows adapters and runs the coordinator.
 func RunWindows(ctx context.Context, config RuntimeConfig) error {
+	if err := config.validateStageOne(); err != nil {
+		return err
+	}
 	capture, err := windows.NewCapture()
 	if err != nil {
 		return fmt.Errorf("initialize Windows capture: %w", err)
 	}
 
-	var live asr.LiveRecognizer
-	if config.volc != nil {
-		client, clientErr := volcengine.NewClient(*config.volc)
-		if clientErr != nil {
-			_ = capture.Close()
-			return fmt.Errorf("configure primary live ASR: %w", clientErr)
-		}
-		live = client
+	client, clientErr := volcengine.NewClient(*config.volc)
+	if clientErr != nil {
+		_ = capture.Close()
+		return fmt.Errorf("configure primary live ASR: %w", clientErr)
 	}
-	var batch asr.SegmentTranscriber
-	if config.mimo != nil {
-		transcriber, transcriberErr := mimo.NewTranscriber(*config.mimo)
-		if transcriberErr != nil {
-			_ = capture.Close()
-			return fmt.Errorf("configure batch ASR: %w", transcriberErr)
-		}
-		batch = transcriber
+	transcriber, transcriberErr := mimo.NewTranscriber(*config.mimo)
+	if transcriberErr != nil {
+		_ = capture.Close()
+		return fmt.Errorf("configure backup batch ASR: %w", transcriberErr)
 	}
 	overlay := windows.NewOverlay()
-	coordinator, err := NewCoordinator(capture, windowsOverlay{overlay}, live, batch, Options{})
+	coordinator, err := NewCoordinator(capture, windowsOverlay{overlay}, client, transcriber, Options{})
 	if err != nil {
 		_ = capture.Close()
 		_ = overlay.Close()
