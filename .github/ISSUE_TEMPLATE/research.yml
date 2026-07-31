@@ -1,0 +1,97 @@
+name: 研究
+description: 为一个明确决策问题收集可追溯证据并形成自包含结论
+title: "[研究] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先阅读根目录 `CONTRIBUTING.md`。研究结果是证据，不会自动成为产品决定；采用结论前必须更新 `docs/` 直属正式文档或决策。
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 研究问题与单一交付物
+      description: 提出一个可回答的问题，并说明交付物及其服务的决策。
+      placeholder: 回答“……”；交付一份包含来源、比较和建议的研究记录，供……决策使用。
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 正式文档背景与决策边界
+      description: 引用相关 docs/ 直属文档，说明哪些既有决定不可由本研究静默改变。
+      placeholder: |
+        - docs/providers.md：相关章节
+        - 本研究只提供证据，不改变……
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依赖
+      description: "使用 #123 或完整 URL 列出前置 issue、待确认条件、必要平台或账户；没有时填写“无”。"
+      placeholder: "无"
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围与非目标
+      description: 分别列出必须调查的对象/维度，以及明确排除的内容。
+      placeholder: |
+        范围：
+        - …
+        非目标：
+        - …
+    validations:
+      required: true
+
+  - type: textarea
+    id: method
+    attributes:
+      label: 方法、来源与时效要求
+      description: 写明优先来源、比较维度、版本/日期要求、复现实验，以及协议、许可证或维护状态的最新核验方式。
+      placeholder: |
+        - 优先使用官方文档、协议和发布记录
+        - 截止/核验日期：YYYY-MM-DD
+        - 比较维度：……
+        - 复现步骤：……
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准与证据
+      description: 定义结论必须覆盖的内容，以及需保存的来源链接、版本、原始输出或脱敏截图。
+      placeholder: |
+        - [ ] 每项关键结论有可访问的来源、版本或核验日期
+        - [ ] 清楚区分事实、推断、建议和未知项
+        - [ ] 提供可复核的实验步骤与原始结果（如适用）
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: 风险、未知项与停止条件
+      description: 列出证据缺口、账户/平台限制、可能失效的假设和无法继续研究的条件；没有时填写“无已知风险”。
+      placeholder: "无已知风险"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: 就绪确认
+      options:
+        - label: 本 issue 只包含一个可独立验收的研究交付，且无需执行者重新定义产品设计。
+          required: true
+        - label: 若建议被采用，将先更新正式文档或决策，再更新实现 issue。
+          required: true
+        - label: 研究记录和证据不会包含凭据、真实账户数据或其他敏感信息。
+          required: true

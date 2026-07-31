@@ -1,0 +1,114 @@
+name: 实现或修复
+description: 将已确定的设计拆成一个可验收的实现或修复交付
+title: "[实现] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先阅读根目录 `CONTRIBUTING.md`。`docs/` 直属正式文档高于 issue；`docs/research/` 仅是证据。若需要改变设计，请先更新正式文档或决策，再更新本 issue。
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 目标与单一交付物
+      description: 说明完成后可独立验收的结果；不要把多个需分别验收的工作合并。
+      placeholder: 完成后将交付……，由……通过……验收。
+    validations:
+      required: true
+
+  - type: textarea
+    id: authority
+    attributes:
+      label: 正式文档与既有决策
+      description: 引用适用的 docs/ 直属文档、决策章节或已批准变更；不要用 research 文档代替正式决策。
+      placeholder: |
+        - docs/architecture.md：相关章节
+        - docs/decisions.md：相关决策
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依赖
+      description: "使用 #123 或完整 URL 列出前置 issue、外部决策和必要环境；没有时填写“无”。"
+      placeholder: "无"
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围
+      description: 列出本 issue 必须完成的文件、行为或场景。
+      placeholder: |
+        - …
+        - …
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: 非目标
+      description: 明确本 issue 刻意不处理的内容，避免执行中扩张范围。
+      placeholder: |
+        - 不包含……
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 实现约束
+      description: 写明接口边界、平台限制、兼容要求和禁止事项，使执行者无需重新设计。
+      placeholder: |
+        - 必须……
+        - 不得……
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 使用可观察、可逐项判定的结果。
+      placeholder: |
+        - [ ] 当……时，观察到……
+        - [ ] …
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: 验证方法与关闭证据
+      description: 列出命令、测试、平台/真实账户验证及关闭时需附的脱敏原始输出、截图或链接。
+      placeholder: |
+        - 命令：`go test ./...`
+        - 平台/账户验证：……
+        - 关闭证据：commit/PR 引用与原始结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: 风险、限制与回滚点
+      description: 列出已知风险、未覆盖场景和回滚方式；没有时填写“无已知风险”。
+      placeholder: "无已知风险"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: 就绪确认
+      options:
+        - label: 本 issue 是一个可独立验收的交付，且内容足以执行而无需重新设计。
+          required: true
+        - label: 本 issue 未静默改变正式设计；如涉及设计变更，正式文档或决策已先更新。
+          required: true
+        - label: 内容和计划提交的验证证据不包含凭据或敏感信息。
+          required: true
