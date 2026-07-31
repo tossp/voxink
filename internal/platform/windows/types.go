@@ -16,6 +16,7 @@ const (
 	updateQueueSize = 8
 	toggleQueueSize = 1
 	maxViewRunes    = 512
+	maxNoticeRunes  = 256
 )
 
 var (
@@ -66,6 +67,7 @@ type View struct {
 	Partial string
 	Final   string
 	Error   string
+	Notice  string
 }
 
 type captureIngress struct {
@@ -134,6 +136,7 @@ func normalizeView(view View) View {
 	view.Partial = truncateRunes(view.Partial, maxViewRunes)
 	view.Final = truncateRunes(view.Final, maxViewRunes)
 	view.Error = truncateRunes(view.Error, maxViewRunes)
+	view.Notice = truncateRunes(view.Notice, maxNoticeRunes)
 	return view
 }
 

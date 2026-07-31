@@ -11,6 +11,7 @@
 | Overlay/UI | 原生 Win32 popup + GDI、no-activate；显示 `Partial`、`Final`、错误和电平 | 未实现；阶段 1 采用目标 |
 | Output | SendInput、剪贴板粘贴、仅复制及降级 | 未实现 |
 | History/settings | SQLite 历史、偏好与凭据引用 | 未实现 |
+| Diagnostics | Coordinator 独占生产固定事件；No-op 默认或有界内存 ring，不落盘、不遥测 | 阶段 1 最小实现 |
 
 ## 状态机
 
@@ -70,6 +71,8 @@ flowchart LR
 
 当前代码仍保留实现无关的 Provider、recognition-mode、Session 和事件领域类型；供应商中心是未来迁移边界，不表示 registry、引擎或主备策略已经实现。
 
+阶段 1 的诊断旁路不接收 Provider/capture 自由文本：worker 只向 Coordinator 发消息，Coordinator 将状态转换成固定 Kind/Stage/vendor/code 和计数/耗时后写入可选 sink。音频外发、内存释放、禁止字段和 active overlay 固定告知见[隐私与诊断](privacy-diagnostics.md)。
+
 ## Windows 阶段 1 线程与数据边界
 
 - 音频采用 `github.com/gen2brain/malgo v0.11.25` 并显式选择 WASAPI，callback 输出固定为 16 kHz、单声道、PCM16。
@@ -83,6 +86,7 @@ flowchart LR
 ## 会话音频、切段与顺序拼接
 
 - 单次会话最长 60 秒；原始 PCM 只存在会话内存，处理完成后释放，默认不落盘。
+- 收音期间音频发送至火山实时识别；仅在主线路失败时把同一会话内存 PCM 段串行发送至 MiMo。active overlay 明示此范围；供应商账户侧留存、训练和地域仍待真实账户及当期条款确认。
 - 非流式/文件路径采用停顿渐进切段：最短有效语音 500ms、连续静音 600ms、无停顿最大段长 15 秒。停顿时在静音区间中点切段且录音继续；用户停止或达到 60 秒上限时冲刷尾段。
 - 500ms 仅限制普通自动封段。用户停止或硬上限产生的非空短尾即使不足 500ms 也提交。
 - 音频段进入唯一 FIFO，按顺序识别和拼接；同一会话不并行识别多个段。中文直接拼接，ASCII 字母/数字边界按需要补空格。停止录音后仍须等待队列排空，才产生完整 `Final`。

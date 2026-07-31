@@ -15,6 +15,7 @@ func TestNormalizeViewBoundsStateTextAndLevel(t *testing.T) {
 		Partial: strings.Repeat("界", maxViewRunes+20),
 		Final:   strings.Repeat("f", maxViewRunes+20),
 		Error:   strings.Repeat("e", maxViewRunes+20),
+		Notice:  strings.Repeat("隐", maxNoticeRunes+20),
 	})
 	if view.Status != ViewError {
 		t.Fatalf("Status = %v, want ViewError", view.Status)
@@ -29,6 +30,9 @@ func TestNormalizeViewBoundsStateTextAndLevel(t *testing.T) {
 		if !strings.HasSuffix(text, "…") {
 			t.Errorf("%s does not have truncation marker", name)
 		}
+	}
+	if got := len([]rune(view.Notice)); got != maxNoticeRunes || !strings.HasSuffix(view.Notice, "…") {
+		t.Fatalf("Notice was not rune-bounded: %d runes, suffix=%q", got, view.Notice[len(view.Notice)-3:])
 	}
 }
 

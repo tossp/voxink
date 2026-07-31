@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/tossp/voxink/internal/asr"
+	"github.com/tossp/voxink/internal/diagnostic"
 )
 
 type liveAccumulator struct {
@@ -106,17 +107,18 @@ func (c *Coordinator) runLiveReader(ctx context.Context, current *activeSession)
 	}
 }
 
-func (c *Coordinator) switchToBatch(current *activeSession) {
+func (c *Coordinator) switchToBatch(current *activeSession, reason diagnostic.Code) {
 	if c.active != current || current.fallback {
 		return
 	}
 	current.liveHealthy = false
 	c.stopLive(current)
 	if c.batch == nil {
-		c.failActive("Transcription provider unavailable")
+		c.failActive("Transcription provider unavailable", diagnostic.StageBatch, diagnostic.CodeBatchFailed)
 		return
 	}
 	current.fallback = true
+	c.recordDiagnostic(current, diagnostic.KindLiveFallback, diagnostic.StageLive, asr.VendorMiMo, reason)
 	c.publish(View{Status: statusFor(current), Partial: "Primary unavailable; using backup", Level: c.view.Level})
 	c.startBatchWorker(current)
 	for _, segment := range current.retained {
@@ -159,7 +161,7 @@ func (c *Coordinator) startBatchWorker(current *activeSession) {
 
 func (c *Coordinator) enqueueBatch(current *activeSession, segment []byte) bool {
 	if current.batchClosed {
-		c.failActive("Transcription queue closed")
+		c.failActive("Transcription queue closed", diagnostic.StageBatch, diagnostic.CodeBatchQueueClosed)
 		return false
 	}
 	select {
@@ -167,7 +169,7 @@ func (c *Coordinator) enqueueBatch(current *activeSession, segment []byte) bool 
 		current.batchPending++
 		return true
 	default:
-		c.failActive("Transcription queue full")
+		c.failActive("Transcription queue full", diagnostic.StageBatch, diagnostic.CodeBatchQueueFull)
 		return false
 	}
 }
@@ -212,6 +214,7 @@ func (c *Coordinator) stopLive(current *activeSession) {
 	current.live = nil
 	current.liveCancel = nil
 	current.liveDone = nil
+	current.liveJobs = nil
 }
 
 func (c *Coordinator) cleanupSession(current *activeSession) {
@@ -226,6 +229,14 @@ func (c *Coordinator) cleanupSession(current *activeSession) {
 			<-current.batchDone
 		}
 	}
+	current.segmenter = nil
+	clear(current.retained)
+	current.retained = nil
+	current.liveJobs = nil
+	current.batchJobs = nil
+	current.batchDone = nil
+	current.accepted = 0
+	current.batchPending = 0
 	c.active = nil
 }
 

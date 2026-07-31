@@ -9,6 +9,7 @@ import (
 
 	"github.com/tossp/voxink/internal/asr"
 	"github.com/tossp/voxink/internal/audio"
+	"github.com/tossp/voxink/internal/diagnostic"
 	"github.com/tossp/voxink/internal/domain"
 	"github.com/tossp/voxink/internal/session"
 )
@@ -79,7 +80,7 @@ func NewSessionID() (domain.SessionID, error) {
 func (c *Coordinator) handleToggle(ctx context.Context) {
 	if c.active != nil {
 		if c.controller.State() == domain.SessionCapturing {
-			c.stopActive()
+			c.stopActive(diagnostic.CodeUserStop)
 		}
 		return
 	}
@@ -109,6 +110,7 @@ func (c *Coordinator) startSession(parent context.Context) {
 	}
 	c.controller = controller
 	c.active = current
+	c.recordDiagnostic(current, diagnostic.KindSessionStarted, diagnostic.StageSession, asr.VendorVolcengine, "")
 	c.publish(View{Status: ViewListening})
 
 	if c.live != nil {
@@ -118,16 +120,16 @@ func (c *Coordinator) startSession(parent context.Context) {
 			current.liveHealthy = true
 			c.startLiveWorkers(current)
 		} else {
-			c.switchToBatch(current)
+			c.switchToBatch(current, diagnostic.CodeLiveDialFailed)
 		}
 	} else {
-		c.switchToBatch(current)
+		c.switchToBatch(current, diagnostic.CodeLiveDialFailed)
 	}
 	if c.active != current {
 		return
 	}
 	if err := c.capture.Start(); err != nil {
-		c.failActive("Capture failed")
+		c.failCapture("Capture failed", diagnostic.CodeCaptureStartFailed)
 	}
 }
 
@@ -137,7 +139,7 @@ func (c *Coordinator) handlePCM(pcm []byte) {
 		return
 	}
 	if len(pcm)%audio.BytesPerSample != 0 {
-		c.failActive("Invalid microphone audio")
+		c.failCapture("Invalid microphone audio", diagnostic.CodeInvalidPCM)
 		return
 	}
 	remaining := maximumSessionBytes - current.accepted
@@ -150,7 +152,7 @@ func (c *Coordinator) handlePCM(pcm []byte) {
 	current.accepted += len(pcm)
 	result, err := current.segmenter.Append(pcm, c.options.DetectSpeech(pcm))
 	if err != nil {
-		c.failActive("Could not segment microphone audio")
+		c.failCapture("Could not segment microphone audio", diagnostic.CodeSegmenterFailed)
 		return
 	}
 	for _, segment := range result.Segments {
@@ -162,11 +164,11 @@ func (c *Coordinator) handlePCM(pcm []byte) {
 		select {
 		case current.liveJobs <- liveJob{pcm: pcm}:
 		default:
-			c.switchToBatch(current)
+			c.switchToBatch(current, diagnostic.CodeLiveQueueFull)
 		}
 	}
 	if c.active == current && result.LimitReached {
-		c.stopActive()
+		c.stopActive(diagnostic.CodeSessionLimit)
 	}
 }
 
@@ -176,7 +178,7 @@ func (c *Coordinator) acceptSegment(current *activeSession, segment []byte) bool
 		return true
 	}
 	if !current.fallback {
-		c.switchToBatch(current)
+		c.switchToBatch(current, diagnostic.CodeLiveWorkerFailed)
 	}
 	if c.active != current {
 		return false
@@ -198,19 +200,20 @@ func (c *Coordinator) handleLevel(level float64) {
 	}
 }
 
-func (c *Coordinator) stopActive() {
+func (c *Coordinator) stopActive(reason diagnostic.Code) {
 	current := c.active
 	if current == nil || current.stopped {
 		return
 	}
 	if err := c.capture.Stop(); err != nil {
-		c.failActive("Capture failed")
+		c.failCapture("Capture failed", diagnostic.CodeCaptureStopFailed)
 		return
 	}
 	current.stopped = true
+	c.recordDiagnostic(current, diagnostic.KindCaptureStopped, diagnostic.StageCapture, "", reason)
 	tail, err := current.segmenter.Finish()
 	if err != nil && !errors.Is(err, audio.ErrSegmenterClosed) {
-		c.failActive("Could not finish microphone audio")
+		c.failCapture("Could not finish microphone audio", diagnostic.CodeSegmenterFailed)
 		return
 	}
 	for _, segment := range tail {
@@ -219,7 +222,7 @@ func (c *Coordinator) stopActive() {
 		}
 	}
 	if !c.controller.Handle(domain.Event{SessionID: current.id, Kind: domain.EventStopped}) {
-		c.failActive("Session state failed")
+		c.failActive("Session state failed", diagnostic.StageSession, diagnostic.CodeStateRejected)
 		return
 	}
 	c.publish(View{Status: ViewTranscribing, Partial: c.view.Partial})
@@ -228,7 +231,7 @@ func (c *Coordinator) stopActive() {
 		select {
 		case current.liveJobs <- liveJob{finish: true}:
 		default:
-			c.switchToBatch(current)
+			c.switchToBatch(current, diagnostic.CodeLiveQueueFull)
 		}
 		if current.protocolEnded && c.active == current {
 			c.finishLive(current)
@@ -266,7 +269,7 @@ func (c *Coordinator) handleWorker(event workerEvent) {
 		}
 	case workerLiveFailure:
 		if current.liveHealthy && !current.protocolEnded {
-			c.switchToBatch(current)
+			c.switchToBatch(current, diagnostic.CodeLiveWorkerFailed)
 		}
 	case workerBatchResult:
 		if !current.fallback || current.batchPending == 0 {
@@ -284,7 +287,7 @@ func (c *Coordinator) handleWorker(event workerEvent) {
 		}
 		c.finishBatchIfReady(current)
 	case workerBatchFailure:
-		c.failActive("Transcription failed")
+		c.failActive("Transcription failed", diagnostic.StageBatch, diagnostic.CodeBatchFailed)
 	}
 }
 
@@ -301,19 +304,24 @@ func (c *Coordinator) finalize(current *activeSession, text string) {
 	}
 	current.finalSent = true
 	if !c.controller.Handle(domain.Event{SessionID: current.id, Kind: domain.EventFinal, Text: text}) {
-		c.failActive("Session finalization failed")
+		c.failActive("Session finalization failed", diagnostic.StageDelivery, diagnostic.CodeStateRejected)
 		return
 	}
 	c.publish(View{Status: ViewTranscribing, Final: text})
-	c.controller.CompleteDelivery(current.id)
+	if !c.controller.CompleteDelivery(current.id) {
+		c.failActive("Session finalization failed", diagnostic.StageDelivery, diagnostic.CodeStateRejected)
+		return
+	}
+	c.recordDiagnostic(current, diagnostic.KindSessionCompleted, diagnostic.StageDelivery, "", "")
 	c.cleanupSession(current)
 }
 
-func (c *Coordinator) failActive(message string) {
+func (c *Coordinator) failActive(message string, stage diagnostic.Stage, code diagnostic.Code) {
 	current := c.active
 	if current == nil {
 		return
 	}
+	c.recordDiagnostic(current, diagnostic.KindSessionFailed, stage, "", code)
 	c.controller.Handle(domain.Event{SessionID: current.id, Kind: domain.EventError, Message: message})
 	_ = c.capture.Stop()
 	c.publish(View{Status: ViewError, Error: message})

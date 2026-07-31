@@ -6,8 +6,12 @@ import (
 	"errors"
 
 	"github.com/tossp/voxink/internal/asr"
+	"github.com/tossp/voxink/internal/diagnostic"
 	"github.com/tossp/voxink/internal/domain"
 )
+
+// AudioPrivacyNotice is the fixed stage-one active-overlay disclosure.
+const AudioPrivacyNotice = "隐私提示：麦克风音频会发送至火山进行实时识别；主线路失败时，同一会话音频可能发送至 MiMo。原始音频默认仅驻留内存且不保存；供应商数据政策请以账户及当期条款为准。"
 
 var (
 	// ErrMissingCapture reports an incomplete application assembly.
@@ -57,6 +61,7 @@ type View struct {
 	Partial string
 	Final   string
 	Error   string
+	Notice  string
 }
 
 // Overlay owns hotkey input and stage-one presentation.
@@ -75,10 +80,11 @@ type SpeechDetector func([]byte) bool
 
 // Options contains local coordinator policies and test seams.
 type Options struct {
-	NewSessionID  SessionIDGenerator
-	DetectSpeech  SpeechDetector
-	WorkerBuffer  int
-	LivePCMBuffer int
+	NewSessionID   SessionIDGenerator
+	DetectSpeech   SpeechDetector
+	DiagnosticSink diagnostic.Sink
+	WorkerBuffer   int
+	LivePCMBuffer  int
 }
 
 // Coordinator serializes all session.Controller access on its Run goroutine.
@@ -89,10 +95,11 @@ type Coordinator struct {
 	batch   asr.SegmentTranscriber
 	options Options
 
-	controller sessionController
-	active     *activeSession
-	workers    chan workerEvent
-	view       View
+	controller  sessionController
+	active      *activeSession
+	workers     chan workerEvent
+	view        View
+	diagnostics diagnostic.Sink
 }
 
 // sessionController is the subset kept private to emphasize single-owner use.
@@ -129,9 +136,12 @@ func NewCoordinator(capture Capture, overlay Overlay, live asr.LiveRecognizer, b
 	if options.LivePCMBuffer <= 0 {
 		options.LivePCMBuffer = 64
 	}
+	if options.DiagnosticSink == nil {
+		options.DiagnosticSink = diagnostic.NoopSink()
+	}
 	return &Coordinator{
 		capture: capture, overlay: overlay, live: live, batch: batch,
-		options: options, workers: make(chan workerEvent, options.WorkerBuffer),
+		options: options, workers: make(chan workerEvent, options.WorkerBuffer), diagnostics: options.DiagnosticSink,
 	}, nil
 }
 
@@ -158,8 +168,8 @@ func (c *Coordinator) Run(ctx context.Context) error {
 			c.handlePCM(pcm)
 		case level := <-c.capture.Levels():
 			c.handleLevel(level)
-		case <-c.capture.Errors():
-			c.failActive("Capture failed")
+		case err := <-c.capture.Errors():
+			c.handleCaptureError(err)
 		case event := <-c.workers:
 			c.handleWorker(event)
 		}
@@ -174,6 +184,11 @@ func (c *Coordinator) Run(ctx context.Context) error {
 }
 
 func (c *Coordinator) publish(view View) {
+	if view.Status == ViewListening || view.Status == ViewTranscribing {
+		view.Notice = AudioPrivacyNotice
+	} else {
+		view.Notice = ""
+	}
 	c.view = view
 	c.overlay.Update(view)
 }

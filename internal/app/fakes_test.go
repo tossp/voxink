@@ -199,37 +199,45 @@ func (t *fakeTranscriber) Transcribe(ctx context.Context, pcm []byte) (string, e
 }
 
 type coordinatorHarness struct {
-	capture *fakeCapture
-	overlay *fakeOverlay
-	cancel  context.CancelFunc
-	done    chan error
+	capture     *fakeCapture
+	overlay     *fakeOverlay
+	coordinator *Coordinator
+	cancel      context.CancelFunc
+	done        chan error
 }
 
 func startHarness(t *testing.T, live asr.LiveRecognizer, batch asr.SegmentTranscriber) *coordinatorHarness {
+	return startHarnessWithOptions(t, live, batch, Options{})
+}
+
+func startHarnessWithOptions(t *testing.T, live asr.LiveRecognizer, batch asr.SegmentTranscriber, options Options) *coordinatorHarness {
 	t.Helper()
 	capture := newFakeCapture()
 	overlay := newFakeOverlay()
 	var ids atomic.Int32
-	coordinator, err := NewCoordinator(capture, overlay, live, batch, Options{
-		NewSessionID: func() (domain.SessionID, error) {
+	if options.NewSessionID == nil {
+		options.NewSessionID = func() (domain.SessionID, error) {
 			return domain.SessionID("session-" + string(rune('0'+ids.Add(1)))), nil
-		},
-		DetectSpeech: func(pcm []byte) bool {
+		}
+	}
+	if options.DetectSpeech == nil {
+		options.DetectSpeech = func(pcm []byte) bool {
 			for _, value := range pcm {
 				if value != 0 {
 					return true
 				}
 			}
 			return false
-		},
-	})
+		}
+	}
+	coordinator, err := NewCoordinator(capture, overlay, live, batch, options)
 	if err != nil {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- coordinator.Run(ctx) }()
-	return &coordinatorHarness{capture: capture, overlay: overlay, cancel: cancel, done: done}
+	return &coordinatorHarness{capture: capture, overlay: overlay, coordinator: coordinator, cancel: cancel, done: done}
 }
 
 func (h *coordinatorHarness) close(t *testing.T) {
