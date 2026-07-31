@@ -28,6 +28,8 @@
 | 并发责任 | audio callback 只复制借用 PCM 到有界 ingress 并计算 level；session owner 串行管理 controller | callback 不分段、不联网、不更新 UI，避免实时线程承担阻塞工作 |
 | 实机 spike 顺序 | audio only → hotkey+overlay → 60s/session → session events → real ASR | 逐层隔离设备、消息循环、会话和协议风险 |
 | 依赖许可事实 | coder/websocket 为 ISC；malgo 为 Unlicense；其 miniaudio 为 Public Domain/MIT-0；x/sys 为 BSD-3-Clause | VoxInk 自身许可证仍未选择；未来分发前需复核并履行依赖通知义务 |
+| 阶段 1 最小诊断 | Coordinator 是唯一应用层生产 owner；默认 No-op，可注入固定容量内存 ring；Event 仅含受限 SessionID、Kind/Stage、可选 vendor、安全 code、计数/耗时 | 排障可关联阶段与类别，同时从类型和构造边界排除正文、原始错误、凭据、endpoint、请求响应和音频；详见[隐私与诊断](privacy-diagnostics.md) |
+| 阶段 1 音频告知 | active overlay 固定告知火山实时外发、失败时同会话 MiMo 备用、原始音频默认仅内存且不保存，并提示供应商政策按账户/当期条款确认 | 在不引入弹窗、设置页或同意数据库的范围内提供用户可见边界，且不夸大供应商留存保证 |
 
 ## 尚未决定
 

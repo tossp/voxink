@@ -59,6 +59,6 @@ func (o windowsOverlay) Update(view View) {
 		status = windows.ViewError
 	}
 	o.overlay.Update(windows.View{
-		Status: status, Level: view.Level, Partial: view.Partial, Final: view.Final, Error: view.Error,
+		Status: status, Level: view.Level, Partial: view.Partial, Final: view.Final, Error: view.Error, Notice: view.Notice,
 	})
 }

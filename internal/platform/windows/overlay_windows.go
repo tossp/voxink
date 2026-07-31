@@ -43,7 +43,7 @@ const (
 	transparent = 1
 
 	windowWidth  = 520
-	windowHeight = 140
+	windowHeight = 230
 )
 
 var (
@@ -283,7 +283,7 @@ func (o *Overlay) paint(hwnd windows.Handle) {
 	}
 
 	view := o.currentView()
-	levelBounds := rect{left: 16, top: 104, right: 16 + int32(float64(windowWidth-32)*view.Level), bottom: 122}
+	levelBounds := rect{left: 16, top: 204, right: 16 + int32(float64(windowWidth-32)*view.Level), bottom: 220}
 	levelBrush, _, _ := procCreateSolidBrush.Call(rgb(72, 180, 112))
 	if levelBrush != 0 {
 		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&levelBounds)), levelBrush)
@@ -294,8 +294,14 @@ func (o *Overlay) paint(hwnd windows.Handle) {
 	procSetTextColor.Call(hdc, rgb(238, 240, 244))
 	text := viewText(view)
 	textPtr, _ := windows.UTF16PtrFromString(text)
-	textBounds := rect{left: 16, top: 14, right: windowWidth - 16, bottom: 98}
+	textBounds := rect{left: 16, top: 14, right: windowWidth - 16, bottom: 100}
 	procDrawText.Call(hdc, uintptr(unsafe.Pointer(textPtr)), ^uintptr(0), uintptr(unsafe.Pointer(&textBounds)), dtLeft|dtWordBreak|dtNoPrefix)
+	if view.Notice != "" {
+		procSetTextColor.Call(hdc, rgb(184, 190, 202))
+		noticePtr, _ := windows.UTF16PtrFromString(view.Notice)
+		noticeBounds := rect{left: 16, top: 108, right: windowWidth - 16, bottom: 196}
+		procDrawText.Call(hdc, uintptr(unsafe.Pointer(noticePtr)), ^uintptr(0), uintptr(unsafe.Pointer(&noticeBounds)), dtLeft|dtWordBreak|dtNoPrefix)
+	}
 }
 
 func viewText(view View) string {

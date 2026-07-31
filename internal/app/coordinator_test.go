@@ -3,12 +3,17 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tossp/voxink/internal/asr"
+	"github.com/tossp/voxink/internal/audio"
+	"github.com/tossp/voxink/internal/diagnostic"
+	"github.com/tossp/voxink/internal/domain"
+	platformwindows "github.com/tossp/voxink/internal/platform/windows"
 )
 
 func TestLiveSuccessWaitsForProtocolTerminalAndSkipsMiMo(t *testing.T) {
@@ -58,6 +63,200 @@ func TestNewCoordinatorRequiresBothStageOneProviders(t *testing.T) {
 	}
 	if _, err := NewCoordinator(capture, overlay, live, nil, Options{}); !errors.Is(err, ErrMissingBatchTranscriber) {
 		t.Fatalf("missing batch error = %v, want %v", err, ErrMissingBatchTranscriber)
+	}
+}
+
+func TestActiveOverlayViewsContainFixedPrivacyNotice(t *testing.T) {
+	live := newFakeLiveSession()
+	harness := startHarness(t, newFakeRecognizer(live), newFakeTranscriber(nil))
+	defer harness.close(t)
+
+	idle := waitView(t, harness.overlay, func(view View) bool { return view.Status == ViewIdle }, "idle")
+	if idle.Notice != "" {
+		t.Fatalf("idle Notice = %q, want empty", idle.Notice)
+	}
+	harness.overlay.toggles <- struct{}{}
+	waitSignal(t, harness.capture.started, "capture start")
+	listening := waitView(t, harness.overlay, func(view View) bool { return view.Status == ViewListening }, "listening")
+	if listening.Notice != AudioPrivacyNotice {
+		t.Fatalf("listening Notice = %q", listening.Notice)
+	}
+	harness.overlay.toggles <- struct{}{}
+	waitSignal(t, live.finished, "live finish")
+	transcribing := waitView(t, harness.overlay, func(view View) bool { return view.Status == ViewTranscribing }, "transcribing")
+	if transcribing.Notice != AudioPrivacyNotice {
+		t.Fatalf("transcribing Notice = %q", transcribing.Notice)
+	}
+	live.reads <- fakeLiveRead{event: asr.LiveEvent{ProtocolTerminal: true}}
+}
+
+func TestDiagnosticLiveCompleteSequenceAndSessionID(t *testing.T) {
+	sink, err := diagnostic.NewMemorySink(16)
+	if err != nil {
+		t.Fatalf("NewMemorySink() error = %v", err)
+	}
+	live := newFakeLiveSession()
+	harness := startHarnessWithOptions(t, newFakeRecognizer(live), newFakeTranscriber(nil), Options{DiagnosticSink: sink})
+	defer harness.close(t)
+
+	harness.overlay.toggles <- struct{}{}
+	waitSignal(t, harness.capture.started, "capture start")
+	harness.overlay.toggles <- struct{}{}
+	waitSignal(t, live.finished, "live finish")
+	live.reads <- fakeLiveRead{event: asr.LiveEvent{Text: "不进入诊断的正文", ProtocolTerminal: true}}
+	waitView(t, harness.overlay, func(view View) bool { return view.Final != "" }, "live final")
+
+	assertDiagnosticSequence(t, sink.Snapshot(), "session-1", []diagnostic.Kind{
+		diagnostic.KindSessionStarted,
+		diagnostic.KindCaptureStopped,
+		diagnostic.KindSessionCompleted,
+	})
+}
+
+func TestDiagnosticFallbackCompleteSequenceAndSessionID(t *testing.T) {
+	sink, err := diagnostic.NewMemorySink(16)
+	if err != nil {
+		t.Fatalf("NewMemorySink() error = %v", err)
+	}
+	recognizer := newFakeRecognizer()
+	recognizer.dialErr = errors.New("dial failed")
+	harness := startHarnessWithOptions(t, recognizer, newFakeTranscriber(func(context.Context, []byte, int) (string, error) {
+		return "备用结果", nil
+	}), Options{DiagnosticSink: sink})
+	defer harness.close(t)
+
+	harness.overlay.toggles <- struct{}{}
+	waitSignal(t, harness.capture.started, "capture start")
+	harness.capture.pcm <- pcm(500*time.Millisecond, 1)
+	harness.capture.pcm <- pcm(600*time.Millisecond, 0)
+	waitPCMCall(t, harness.coordinator.batch.(*fakeTranscriber).calls, "fallback segment")
+	harness.overlay.toggles <- struct{}{}
+	waitView(t, harness.overlay, func(view View) bool { return view.Final != "" }, "fallback final")
+
+	snapshot := sink.Snapshot()
+	assertDiagnosticSequence(t, snapshot, "session-1", []diagnostic.Kind{
+		diagnostic.KindSessionStarted,
+		diagnostic.KindLiveFallback,
+		diagnostic.KindCaptureStopped,
+		diagnostic.KindSessionCompleted,
+	})
+	if snapshot.Events[1].AsrVendor() != asr.VendorMiMo || snapshot.Events[1].Code() != diagnostic.CodeLiveDialFailed {
+		t.Fatalf("fallback metadata = (%q, %q)", snapshot.Events[1].AsrVendor(), snapshot.Events[1].Code())
+	}
+}
+
+func TestCoordinatorDiagnosticsDoNotRetainInjectedSecretsAudioOrText(t *testing.T) {
+	sink, err := diagnostic.NewMemorySink(16)
+	if err != nil {
+		t.Fatalf("NewMemorySink() error = %v", err)
+	}
+	canaries := []string{
+		"canary-api-key-123", "Authorization: Bearer canary-token",
+		"PCM=00ff01", "UklGRkJBU0U2NA==", "这是识别正文", "https://secret.example/asr?key=canary",
+	}
+	injected := errors.New(strings.Join(canaries, " | "))
+	recognizer := newFakeRecognizer()
+	recognizer.dialErr = injected
+	harness := startHarnessWithOptions(t, recognizer, newFakeTranscriber(func(context.Context, []byte, int) (string, error) {
+		return "", injected
+	}), Options{DiagnosticSink: sink})
+	defer harness.close(t)
+
+	harness.overlay.toggles <- struct{}{}
+	waitSignal(t, harness.capture.started, "capture start")
+	harness.capture.pcm <- pcm(500*time.Millisecond, 1)
+	harness.capture.pcm <- pcm(600*time.Millisecond, 0)
+	waitView(t, harness.overlay, func(view View) bool { return view.Status == ViewError }, "batch error")
+
+	snapshot := sink.Snapshot()
+	assertDiagnosticSequence(t, snapshot, "session-1", []diagnostic.Kind{
+		diagnostic.KindSessionStarted,
+		diagnostic.KindLiveFallback,
+		diagnostic.KindSessionFailed,
+	})
+	serialized := fmt.Sprintf("%+v", snapshot)
+	for _, canary := range canaries {
+		if strings.Contains(serialized, canary) {
+			t.Fatalf("diagnostic snapshot leaked %q: %s", canary, serialized)
+		}
+	}
+}
+
+func TestCaptureOverflowProducesCategorizedFaultAndFailure(t *testing.T) {
+	sink, err := diagnostic.NewMemorySink(16)
+	if err != nil {
+		t.Fatalf("NewMemorySink() error = %v", err)
+	}
+	harness := startHarnessWithOptions(t, newFakeRecognizer(newFakeLiveSession()), newFakeTranscriber(nil), Options{DiagnosticSink: sink})
+	defer harness.close(t)
+
+	harness.overlay.toggles <- struct{}{}
+	waitSignal(t, harness.capture.started, "capture start")
+	harness.capture.errors <- fmt.Errorf("wrapped callback detail: %w", platformwindows.ErrPCMOverflow)
+	waitView(t, harness.overlay, func(view View) bool { return view.Status == ViewError }, "capture overflow")
+
+	snapshot := sink.Snapshot()
+	assertDiagnosticSequence(t, snapshot, "session-1", []diagnostic.Kind{
+		diagnostic.KindSessionStarted,
+		diagnostic.KindCaptureFault,
+		diagnostic.KindSessionFailed,
+	})
+	for _, event := range snapshot.Events[1:] {
+		if event.Code() != diagnostic.CodeCaptureOverflow {
+			t.Fatalf("capture event code = %q", event.Code())
+		}
+	}
+}
+
+func TestCaptureInternalErrorUsesFixedCodeWithoutRawMessage(t *testing.T) {
+	sink, err := diagnostic.NewMemorySink(8)
+	if err != nil {
+		t.Fatalf("NewMemorySink() error = %v", err)
+	}
+	harness := startHarnessWithOptions(t, newFakeRecognizer(newFakeLiveSession()), newFakeTranscriber(nil), Options{DiagnosticSink: sink})
+	defer harness.close(t)
+
+	harness.overlay.toggles <- struct{}{}
+	waitSignal(t, harness.capture.started, "capture start")
+	harness.capture.errors <- errors.New("internal canary Authorization PCM UklGRg== 识别正文")
+	errorView := waitView(t, harness.overlay, func(view View) bool { return view.Status == ViewError }, "capture internal error")
+	if errorView.Notice != "" {
+		t.Fatalf("error Notice = %q, want empty", errorView.Notice)
+	}
+	snapshot := sink.Snapshot()
+	assertDiagnosticSequence(t, snapshot, "session-1", []diagnostic.Kind{
+		diagnostic.KindSessionStarted,
+		diagnostic.KindCaptureFault,
+		diagnostic.KindSessionFailed,
+	})
+	for _, event := range snapshot.Events[1:] {
+		if event.Code() != diagnostic.CodeCaptureInternal {
+			t.Fatalf("capture event code = %q", event.Code())
+		}
+	}
+	if strings.Contains(fmt.Sprintf("%+v", snapshot), "internal canary") {
+		t.Fatalf("diagnostic snapshot retained raw capture error: %+v", snapshot)
+	}
+}
+
+func TestCleanupSessionReleasesAudioReferences(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	current := &activeSession{
+		ctx: ctx, cancel: cancel, segmenter: audio.NewProgressiveSegmenter(), accepted: 42,
+		retained: [][]byte{{1, 2, 3}}, liveJobs: make(chan liveJob, 1), batchJobs: make(chan []byte, 1),
+	}
+	current.liveJobs <- liveJob{pcm: []byte{4, 5, 6}}
+	current.batchJobs <- []byte{7, 8, 9}
+	coordinator := &Coordinator{active: current}
+
+	coordinator.cleanupSession(current)
+
+	if coordinator.active != nil || current.segmenter != nil || current.retained != nil || current.liveJobs != nil || current.batchJobs != nil {
+		t.Fatalf("audio references remain after cleanup: active=%v segmenter=%v retained=%v liveJobs=%v batchJobs=%v",
+			coordinator.active, current.segmenter, current.retained, current.liveJobs, current.batchJobs)
+	}
+	if current.accepted != 0 || current.batchPending != 0 {
+		t.Fatalf("audio counters remain after cleanup: accepted=%d pending=%d", current.accepted, current.batchPending)
 	}
 }
 
@@ -164,6 +363,9 @@ func TestMiMoSegmentFailureEndsFailedWithoutIncompleteFinal(t *testing.T) {
 	if errorView.Error != "Transcription failed" {
 		t.Fatalf("Error = %q", errorView.Error)
 	}
+	if errorView.Notice != "" {
+		t.Fatalf("error Notice = %q, want empty", errorView.Notice)
+	}
 	if len(finalViews(harness.overlay)) != 0 {
 		t.Fatal("failed MiMo segment produced an incomplete Final")
 	}
@@ -173,12 +375,16 @@ func TestMiMoSegmentFailureEndsFailedWithoutIncompleteFinal(t *testing.T) {
 }
 
 func TestSessionLimitAutomaticallyStopsAndFlushesTail(t *testing.T) {
+	sink, err := diagnostic.NewMemorySink(16)
+	if err != nil {
+		t.Fatalf("NewMemorySink() error = %v", err)
+	}
 	var lengths []int
 	batch := newFakeTranscriber(func(_ context.Context, pcm []byte, index int) (string, error) {
 		lengths = append(lengths, len(pcm))
 		return string(rune('A' + index)), nil
 	})
-	harness := startHarness(t, newFakeRecognizer(), batch)
+	harness := startHarnessWithOptions(t, newFakeRecognizer(), batch, Options{DiagnosticSink: sink})
 	defer harness.close(t)
 
 	harness.overlay.toggles <- struct{}{}
@@ -193,6 +399,18 @@ func TestSessionLimitAutomaticallyStopsAndFlushesTail(t *testing.T) {
 	wantTail := len(pcm(14*time.Second, 1))
 	if got := lengths[len(lengths)-1]; got != wantTail {
 		t.Fatalf("flushed tail bytes = %d, want %d", got, wantTail)
+	}
+	foundLimit := false
+	for _, event := range sink.Snapshot().Events {
+		if event.Kind() == diagnostic.KindCaptureStopped {
+			foundLimit = true
+			if event.Code() != diagnostic.CodeSessionLimit {
+				t.Fatalf("limit stop code = %q", event.Code())
+			}
+		}
+	}
+	if !foundLimit {
+		t.Fatal("session limit did not produce capture_stopped diagnostic")
 	}
 }
 
@@ -243,5 +461,18 @@ func TestNewSessionIDUsesRandomNonemptyValues(t *testing.T) {
 	}
 	if len(first) != 32 || len(second) != 32 || first == second {
 		t.Fatalf("session IDs = %q, %q", first, second)
+	}
+}
+
+func assertDiagnosticSequence(t *testing.T, snapshot diagnostic.Snapshot, sessionID domain.SessionID, kinds []diagnostic.Kind) {
+	t.Helper()
+	if len(snapshot.Events) != len(kinds) {
+		t.Fatalf("diagnostic event count = %d, want %d; snapshot=%+v", len(snapshot.Events), len(kinds), snapshot)
+	}
+	for index, kind := range kinds {
+		event := snapshot.Events[index]
+		if event.Kind() != kind || event.SessionID() != sessionID {
+			t.Fatalf("event[%d] = (kind=%v session=%q), want (kind=%v session=%q)", index, event.Kind(), event.SessionID(), kind, sessionID)
+		}
 	}
 }
