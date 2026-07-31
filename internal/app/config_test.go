@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tossp/voxink/internal/asr"
 	"github.com/tossp/voxink/internal/provider/mimo"
 	"github.com/tossp/voxink/internal/provider/volcengine"
 )
@@ -26,6 +27,7 @@ func TestLoadRuntimeConfigNewAndLegacyVolcAuth(t *testing.T) {
 
 	legacyConfig, err := LoadRuntimeConfig(env(map[string]string{
 		envVolcAppKey: "legacy-app", envVolcAccessKey: "legacy-access", envVolcResourceID: "resource",
+		envMiMoAPIKey: "mimo-secret",
 	}))
 	if err != nil {
 		t.Fatalf("LoadRuntimeConfig(legacy) error = %v", err)
@@ -33,19 +35,84 @@ func TestLoadRuntimeConfigNewAndLegacyVolcAuth(t *testing.T) {
 	if legacyConfig.volc.Auth.Mode != volcengine.AuthLegacy || legacyConfig.volc.Auth.AccessKey != "legacy-access" {
 		t.Fatalf("legacy Volc auth = %+v", legacyConfig.volc.Auth)
 	}
+	if newConfig.route != asr.StageOneRoute() || legacyConfig.route != asr.StageOneRoute() {
+		t.Fatalf("runtime routes = %+v / %+v", newConfig.route, legacyConfig.route)
+	}
+}
+
+func TestLoadRuntimeConfigRequiresBothStageOneCredentialSets(t *testing.T) {
+	tests := []struct {
+		name   string
+		values map[string]string
+		want   error
+	}{
+		{name: "both missing", want: ErrNoCredentials},
+		{
+			name:   "Volcengine missing",
+			values: map[string]string{envMiMoAPIKey: "mimo-secret"},
+			want:   ErrMissingVolcengineCredentials,
+		},
+		{
+			name:   "MiMo missing",
+			values: map[string]string{envVolcAPIKey: "volc-secret", envVolcResourceID: "resource"},
+			want:   ErrMissingMiMoCredentials,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadRuntimeConfig(env(tt.values))
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("LoadRuntimeConfig() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadRuntimeConfigMissingCredentialErrorsAreRedactedAndActionable(t *testing.T) {
+	tests := []struct {
+		name      string
+		values    map[string]string
+		secret    string
+		actionEnv string
+	}{
+		{
+			name:   "Volcengine missing",
+			values: map[string]string{envMiMoAPIKey: "mimo-secret-value"},
+			secret: "mimo-secret-value", actionEnv: envVolcAPIKey,
+		},
+		{
+			name:   "MiMo missing",
+			values: map[string]string{envVolcAPIKey: "volc-secret-value", envVolcResourceID: "resource-secret-value"},
+			secret: "volc-secret-value", actionEnv: envMiMoAPIKey,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadRuntimeConfig(env(tt.values))
+			if err == nil {
+				t.Fatal("LoadRuntimeConfig() error = nil")
+			}
+			message := err.Error()
+			if strings.Contains(message, tt.secret) {
+				t.Fatalf("credential error leaked secret: %q", message)
+			}
+			if !strings.Contains(message, tt.actionEnv) {
+				t.Fatalf("credential error %q does not name %s", message, tt.actionEnv)
+			}
+		})
+	}
 }
 
 func TestLoadRuntimeConfigCredentialsAndReadLimitValidation(t *testing.T) {
-	if _, err := LoadRuntimeConfig(env(nil)); !errors.Is(err, ErrNoCredentials) {
-		t.Fatalf("missing credentials error = %v, want ErrNoCredentials", err)
-	}
 	if _, err := LoadRuntimeConfig(env(map[string]string{
-		envVolcAPIKey: "secret", envVolcResourceID: "resource", envVolcReadLimit: "not-a-number",
+		envVolcAPIKey: "secret", envVolcResourceID: "resource", envMiMoAPIKey: "mimo-secret",
+		envVolcReadLimit: "not-a-number",
 	})); err == nil || !strings.Contains(err.Error(), envVolcReadLimit) {
 		t.Fatalf("invalid read limit error = %v", err)
 	}
 	config, err := LoadRuntimeConfig(env(map[string]string{
-		envVolcAPIKey: "secret", envVolcResourceID: "resource", envVolcReadLimit: "65536",
+		envVolcAPIKey: "secret", envVolcResourceID: "resource", envMiMoAPIKey: "mimo-secret",
+		envVolcReadLimit: "65536",
 	}))
 	if err != nil {
 		t.Fatalf("LoadRuntimeConfig() error = %v", err)
@@ -55,6 +122,7 @@ func TestLoadRuntimeConfigCredentialsAndReadLimitValidation(t *testing.T) {
 	}
 	if _, err := LoadRuntimeConfig(env(map[string]string{
 		envVolcAPIKey: "new", envVolcAppKey: "legacy", envVolcAccessKey: "legacy-access", envVolcResourceID: "resource",
+		envMiMoAPIKey: "mimo-secret",
 	})); err == nil {
 		t.Fatal("mixed new and legacy Volcengine credentials were accepted")
 	}
@@ -85,7 +153,8 @@ func TestLoadRuntimeConfigEndpointOverridesAndRedaction(t *testing.T) {
 
 	querySecret := "query-secret"
 	_, err = LoadRuntimeConfig(env(map[string]string{
-		envMiMoAPIKey: "key", envMiMoEndpoint: "http://localhost/asr?token=" + querySecret,
+		envVolcAPIKey: "volc", envVolcResourceID: "resource", envMiMoAPIKey: "key",
+		envMiMoEndpoint: "http://localhost/asr?token=" + querySecret,
 	}))
 	if err == nil || strings.Contains(err.Error(), querySecret) {
 		t.Fatalf("endpoint query validation error leaked secret: %v", err)

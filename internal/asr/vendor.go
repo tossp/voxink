@@ -103,3 +103,59 @@ func (r Route) Validate(registry Registry) error {
 	}
 	return nil
 }
+
+// RouteProvider binds one supplier to the model selected from that supplier.
+type RouteProvider struct {
+	Vendor AsrVendor
+	Model  domain.ProviderKind
+}
+
+// ProviderRoute selects the model-specific primary and backup providers.
+type ProviderRoute struct {
+	Primary RouteProvider
+	Backup  RouteProvider
+}
+
+// StageOneRoute returns the fixed stage-one Volcengine live and MiMo batch route.
+func StageOneRoute() ProviderRoute {
+	return ProviderRoute{
+		Primary: RouteProvider{Vendor: VendorVolcengine, Model: domain.ProviderVolcengineV3},
+		Backup:  RouteProvider{Vendor: VendorMiMo, Model: domain.ProviderMiMoASR},
+	}
+}
+
+// ValidateStageOneRoute checks that route is exactly the supported stage-one route.
+func ValidateStageOneRoute(route ProviderRoute, registry Registry) error {
+	if route != StageOneRoute() {
+		return fmt.Errorf("stage-one ASR route must use Volcengine V3 primary and MiMo mimo-v2.5-asr backup")
+	}
+	return route.Validate(registry)
+}
+
+// Validate checks supplier separation and model ownership for a provider route.
+func (r ProviderRoute) Validate(registry Registry) error {
+	vendors := Route{Primary: r.Primary.Vendor, Backup: r.Backup.Vendor}
+	if err := vendors.Validate(registry); err != nil {
+		return err
+	}
+	if r.Backup.Vendor == "" {
+		return fmt.Errorf("backup ASR vendor must not be empty")
+	}
+	if err := validateModelOwnership(registry, "primary", r.Primary); err != nil {
+		return err
+	}
+	return validateModelOwnership(registry, "backup", r.Backup)
+}
+
+func validateModelOwnership(registry Registry, role string, provider RouteProvider) error {
+	if provider.Model == "" {
+		return fmt.Errorf("%s ASR model must not be empty", role)
+	}
+	descriptor, _ := registry.Lookup(provider.Vendor)
+	for _, model := range descriptor.Models {
+		if model == provider.Model {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s ASR model %q does not belong to vendor %q", role, provider.Model, provider.Vendor)
+}

@@ -1,11 +1,13 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 
+	"github.com/tossp/voxink/internal/asr"
 	"github.com/tossp/voxink/internal/provider/mimo"
 	"github.com/tossp/voxink/internal/provider/volcengine"
 )
@@ -28,6 +30,7 @@ const (
 // RuntimeConfig contains environment-derived provider construction inputs.
 // Its String method intentionally exposes only non-secret availability metadata.
 type RuntimeConfig struct {
+	route         asr.ProviderRoute
 	volc          *volcengine.Config
 	mimo          *mimo.Config
 	volcOverride  bool
@@ -56,7 +59,11 @@ func LoadRuntimeConfig(getenv func(string) string) (RuntimeConfig, error) {
 	}
 
 	config := RuntimeConfig{
+		route:        asr.StageOneRoute(),
 		volcOverride: volcOverride, mimoOverride: mimoOverride, volcReadLimit: readLimit,
+	}
+	if err := asr.ValidateStageOneRoute(config.route, asr.DefaultRegistry()); err != nil {
+		return RuntimeConfig{}, fmt.Errorf("validate fixed stage-one ASR route: %w", err)
 	}
 	apiKey := getenv(envVolcAPIKey)
 	resourceID := getenv(envVolcResourceID)
@@ -96,10 +103,26 @@ func LoadRuntimeConfig(getenv func(string) string) (RuntimeConfig, error) {
 			Endpoint: mimoEndpoint, AuthMode: authMode, APIKey: key, Language: mimo.LanguageAuto,
 		}
 	}
-	if config.volc == nil && config.mimo == nil {
-		return RuntimeConfig{}, ErrNoCredentials
+	if err := config.validateStageOne(); err != nil {
+		return RuntimeConfig{}, err
 	}
 	return config, nil
+}
+
+func (c RuntimeConfig) validateStageOne() error {
+	if err := asr.ValidateStageOneRoute(c.route, asr.DefaultRegistry()); err != nil {
+		return fmt.Errorf("validate runtime ASR route: %w", err)
+	}
+	if c.volc == nil && c.mimo == nil {
+		return errors.Join(ErrNoCredentials, ErrMissingVolcengineCredentials, ErrMissingMiMoCredentials)
+	}
+	if c.volc == nil {
+		return ErrMissingVolcengineCredentials
+	}
+	if c.mimo == nil {
+		return ErrMissingMiMoCredentials
+	}
+	return nil
 }
 
 func newVolcConfig(endpoint string, readLimit int64, auth volcengine.AuthConfig) *volcengine.Config {
