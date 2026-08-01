@@ -13,6 +13,7 @@ import (
 )
 
 func main() {
+	handleSelfCheck()
 	config, err := app.LoadRuntimeConfig(os.Getenv)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "VoxInk configuration error:", err)

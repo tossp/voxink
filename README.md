@@ -26,6 +26,18 @@ VoxInk 是计划中的 Windows 跨应用语音输入工具。
 
 运行前需在本机设置环境变量：火山使用 `VOXINK_VOLC_API_KEY` 与 `VOXINK_VOLC_RESOURCE_ID`，MiMo 使用 `VOXINK_MIMO_API_KEY`；火山 legacy 认证可改用 `VOXINK_VOLC_APP_KEY`、`VOXINK_VOLC_ACCESS_KEY` 与 `VOXINK_VOLC_RESOURCE_ID`。不要将任何值写入仓库、issue 或日志。
 
+## 分层自检
+
+`self-check` 子命令不读取 Provider 凭据，也不调用 Provider。静态报告可在任意开发平台生成；音频与交互探针必须在相应的 Windows 环境运行：
+
+```text
+voxink self-check --mode=static --json
+voxink self-check --mode=audio --duration=3s --json
+voxink self-check --mode=interactive --timeout=15s --json
+```
+
+JSON 只写入 stdout，交互提示与参数错误写入 stderr。报告不会包含 PCM、设备名、窗口标题、路径、环境变量值、识别文本或原始错误；interactive 报告中的 `focus_confirmation_required` 仍须人工确认，不能由程序自动判定。完整说明见[分层自检](docs/self-check.md)。
+
 ## 开发进度
 
 开发状态与后续计划见 [开发路线图](docs/roadmap.md)。
