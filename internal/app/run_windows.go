@@ -36,7 +36,7 @@ func RunWindows(ctx context.Context, config RuntimeConfig) error {
 		_ = capture.Close()
 		return fmt.Errorf("initialize Windows output: %w", outputErr)
 	}
-	overlay := windows.NewOverlay()
+	overlay := windows.NewOverlayWithHotkey(config.hotkey)
 	coordinator, err := NewCoordinator(capture, windowsOverlay{overlay}, client, transcriber, Options{Output: textOutput})
 	if err != nil {
 		_ = capture.Close()

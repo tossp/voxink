@@ -15,7 +15,8 @@ import (
 )
 
 const (
-	defaultEndpoint      = "https://api.xiaomimimo.com/v1/chat/completions"
+	// DefaultEndpoint is the built-in MiMo HTTPS transcription endpoint.
+	DefaultEndpoint      = "https://api.xiaomimimo.com/v1/chat/completions"
 	modelName            = "mimo-v2.5-asr"
 	maxEncodedAudioBytes = 10 * 1024 * 1024
 	maxResponseBytes     = 1024 * 1024
@@ -65,7 +66,7 @@ type Transcriber struct {
 // NewTranscriber validates MiMo endpoint, authentication mode, and language.
 func NewTranscriber(config Config) (*Transcriber, error) {
 	if config.Endpoint == "" {
-		config.Endpoint = defaultEndpoint
+		config.Endpoint = DefaultEndpoint
 	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = http.DefaultClient

@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tossp/voxink/internal/credential"
 	"github.com/tossp/voxink/internal/selfcheck"
+	"github.com/tossp/voxink/internal/settings"
 	"github.com/tossp/voxink/internal/smoke"
 )
 
@@ -62,11 +64,14 @@ func TestDispatchSmokeMissingConfigIsRedactedBeforeApplicationStartup(t *testing
 
 	const canary = "/private/audio/dispatch-secret-canary.wav"
 	var stdout, stderr bytes.Buffer
-	handled, code := dispatchCommand(
+	handled, code := dispatchCommandWithStores(
 		[]string{"smoke", "volc", "--audio", canary, "--confirm-send", "--json"},
 		strings.NewReader(""),
 		&stdout,
 		&stderr,
+		&commandCredentialStore{values: make(map[credential.Name][]byte)},
+		&commandSettingsStore{document: settings.EmptyDocument()},
+		func(string) string { return "" },
 	)
 	if !handled || code != 1 {
 		t.Fatalf("dispatch smoke = %t/%d", handled, code)
@@ -115,7 +120,57 @@ func TestDispatchCredentialSetReadsStdinWithoutLeakingIt(t *testing.T) {
 	}
 }
 
+func TestDispatchSettingsSetListDeleteAndSelfCheckIsolation(t *testing.T) {
+	store := &commandSettingsStore{document: settings.EmptyDocument()}
+	credentials := &commandCredentialStore{values: make(map[credential.Name][]byte)}
+	var stdout, stderr bytes.Buffer
+	handled, code := dispatchCommandWithStores(
+		[]string{"config", "settings", "set", "hotkey", "Win+F7"}, strings.NewReader(""), &stdout, &stderr,
+		credentials, store, func(string) string { return "" },
+	)
+	if !handled || code != 0 || store.document.Hotkey == nil || *store.document.Hotkey != "Win+F7" {
+		t.Fatalf("settings set = %t/%d document=%+v stderr=%q", handled, code, store.document, stderr.String())
+	}
+	stdout.Reset()
+	handled, code = dispatchCommandWithStores(
+		[]string{"config", "settings", "list", "--json"}, strings.NewReader(""), &stdout, &stderr,
+		credentials, store, func(string) string { return "" },
+	)
+	if !handled || code != 0 || !strings.Contains(stdout.String(), `"hotkey":"Win+F7"`) {
+		t.Fatalf("settings list = %t/%d stdout=%q stderr=%q", handled, code, stdout.String(), stderr.String())
+	}
+
+	store.loadErr = errors.New("settings path canary")
+	stdout.Reset()
+	stderr.Reset()
+	handled, code = dispatchCommandWithStores(
+		[]string{"self-check", "--mode=static", "--json"}, strings.NewReader(""), &stdout, &stderr,
+		credentials, store, func(string) string { return "" },
+	)
+	if !handled || code != 0 || store.loadCalls != 2 {
+		t.Fatalf("self-check settings isolation = %t/%d loadCalls=%d stderr=%q", handled, code, store.loadCalls, stderr.String())
+	}
+}
+
 type commandCredentialStore struct{ values map[credential.Name][]byte }
+
+type commandSettingsStore struct {
+	document  settings.Document
+	loadErr   error
+	saveErr   error
+	loadCalls int
+}
+
+func (s *commandSettingsStore) Load() (settings.Document, error) {
+	s.loadCalls++
+	return s.document, s.loadErr
+}
+func (s *commandSettingsStore) Save(document settings.Document) error {
+	if s.saveErr == nil {
+		s.document = document
+	}
+	return s.saveErr
+}
 
 func (s *commandCredentialStore) Read(name credential.Name) ([]byte, error) {
 	value, ok := s.values[name]

@@ -3,19 +3,18 @@ package app
 import (
 	"errors"
 	"fmt"
-	"net/url"
-	"strconv"
-	"strings"
 
 	"github.com/tossp/voxink/internal/asr"
 	"github.com/tossp/voxink/internal/credential"
+	platformwindows "github.com/tossp/voxink/internal/platform/windows"
 	"github.com/tossp/voxink/internal/provider/mimo"
 	"github.com/tossp/voxink/internal/provider/volcengine"
+	"github.com/tossp/voxink/internal/settings"
 )
 
 const (
 	// DefaultVolcengineReadLimit is a local defensive cap, not a provider-published maximum.
-	DefaultVolcengineReadLimit int64 = 1024 * 1024
+	DefaultVolcengineReadLimit int64 = settings.DefaultVolcReadLimitBytes
 
 	envVolcAPIKey     = "VOXINK_VOLC_API_KEY"
 	envVolcResourceID = "VOXINK_VOLC_RESOURCE_ID"
@@ -28,15 +27,15 @@ const (
 	envMiMoEndpoint   = "VOXINK_MIMO_ENDPOINT"
 )
 
-// RuntimeConfig contains environment-derived provider construction inputs.
+// RuntimeConfig contains resolved non-sensitive settings and provider construction inputs.
 // Its String method intentionally exposes only non-secret availability metadata.
 type RuntimeConfig struct {
-	route         asr.ProviderRoute
-	volc          *volcengine.Config
-	mimo          *mimo.Config
-	volcOverride  bool
-	mimoOverride  bool
-	volcReadLimit int64
+	route        asr.ProviderRoute
+	volc         *volcengine.Config
+	mimo         *mimo.Config
+	volcOverride bool
+	mimoOverride bool
+	hotkey       platformwindows.Hotkey
 }
 
 // LoadRuntimeConfig reads stage-one settings without persistence or logging.
@@ -47,12 +46,26 @@ func LoadRuntimeConfig(getenv func(string) string) (RuntimeConfig, error) {
 // LoadRuntimeConfigWithCredentials reads Provider credentials from store before
 // falling back to the existing environment variables.
 func LoadRuntimeConfigWithCredentials(getenv func(string) string, store credential.Store) (RuntimeConfig, error) {
-	resolve := credential.Resolver{Store: store, Getenv: getenv}.Get
-	volcConfig, volcOverride, readLimit, err := loadVolcengineConfig(getenv, resolve)
+	return LoadRuntimeConfigWithSettings(getenv, store, nil)
+}
+
+// LoadRuntimeConfigWithSettings applies persisted non-sensitive settings before
+// environment/default fallback while retaining credential-store precedence.
+func LoadRuntimeConfigWithSettings(getenv func(string) string, store credential.Store, loader settings.Loader) (RuntimeConfig, error) {
+	document, err := settings.Load(loader)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
-	mimoConfig, mimoOverride, err := loadMiMoConfig(getenv, resolve)
+	effective, err := settings.Resolve(document, getenv)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+	resolve := credential.Resolver{Store: store, Getenv: getenv}.Get
+	volcConfig, volcOverride, _, err := loadVolcengineConfig(effective.VolcEndpoint, effective.VolcReadLimitBytes, resolve)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+	mimoConfig, mimoOverride, err := loadMiMoConfig(effective.MiMoEndpoint, effective.MiMoAuthMode, resolve)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
@@ -61,7 +74,8 @@ func LoadRuntimeConfigWithCredentials(getenv func(string) string, store credenti
 		route:        asr.StageOneRoute(),
 		volc:         volcConfig,
 		mimo:         mimoConfig,
-		volcOverride: volcOverride, mimoOverride: mimoOverride, volcReadLimit: readLimit,
+		volcOverride: volcOverride, mimoOverride: mimoOverride,
+		hotkey: effective.Hotkey,
 	}
 	if err := asr.ValidateStageOneRoute(config.route, asr.DefaultRegistry()); err != nil {
 		return RuntimeConfig{}, fmt.Errorf("validate fixed stage-one ASR route: %w", err)
@@ -81,7 +95,20 @@ func LoadVolcengineConfig(getenv func(string) string) (volcengine.Config, error)
 // LoadVolcengineConfigWithCredentials loads only Volcengine configuration with
 // Credential Manager precedence over environment variables.
 func LoadVolcengineConfigWithCredentials(getenv func(string) string, store credential.Store) (volcengine.Config, error) {
-	config, _, _, err := loadVolcengineConfig(getenv, credential.Resolver{Store: store, Getenv: getenv}.Get)
+	return LoadVolcengineConfigWithSettings(getenv, store, nil)
+}
+
+// LoadVolcengineConfigWithSettings applies the same persisted override used by normal startup.
+func LoadVolcengineConfigWithSettings(getenv func(string) string, store credential.Store, loader settings.Loader) (volcengine.Config, error) {
+	document, err := settings.Load(loader)
+	if err != nil {
+		return volcengine.Config{}, err
+	}
+	endpoint, readLimit, err := settings.ResolveVolc(document, getenv)
+	if err != nil {
+		return volcengine.Config{}, err
+	}
+	config, _, _, err := loadVolcengineConfig(endpoint, readLimit, credential.Resolver{Store: store, Getenv: getenv}.Get)
 	if err != nil {
 		return volcengine.Config{}, err
 	}
@@ -91,19 +118,8 @@ func LoadVolcengineConfigWithCredentials(getenv func(string) string, store crede
 	return *config, nil
 }
 
-func loadVolcengineConfig(getenv func(string) string, resolve func(credential.Name) (string, error)) (*volcengine.Config, bool, int64, error) {
-	readLimit := DefaultVolcengineReadLimit
-	if raw := strings.TrimSpace(getenv(envVolcReadLimit)); raw != "" {
-		parsed, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || parsed <= 0 {
-			return nil, false, 0, fmt.Errorf("%s must be a positive integer", envVolcReadLimit)
-		}
-		readLimit = parsed
-	}
-	endpoint, override, err := endpointOverride(getenv(envVolcEndpoint), "Volcengine", "ws", "wss")
-	if err != nil {
-		return nil, false, 0, err
-	}
+func loadVolcengineConfig(endpoint string, readLimit int64, resolve func(credential.Name) (string, error)) (*volcengine.Config, bool, int64, error) {
+	override := endpoint != volcengine.DefaultEndpoint
 	apiKey, err := resolve(credential.VolcAPIKey)
 	if err != nil {
 		return nil, false, 0, err
@@ -152,7 +168,20 @@ func LoadMiMoConfig(getenv func(string) string) (mimo.Config, error) {
 // LoadMiMoConfigWithCredentials loads only MiMo configuration with Credential
 // Manager precedence over the environment variable.
 func LoadMiMoConfigWithCredentials(getenv func(string) string, store credential.Store) (mimo.Config, error) {
-	config, _, err := loadMiMoConfig(getenv, credential.Resolver{Store: store, Getenv: getenv}.Get)
+	return LoadMiMoConfigWithSettings(getenv, store, nil)
+}
+
+// LoadMiMoConfigWithSettings applies the same persisted override used by normal startup.
+func LoadMiMoConfigWithSettings(getenv func(string) string, store credential.Store, loader settings.Loader) (mimo.Config, error) {
+	document, err := settings.Load(loader)
+	if err != nil {
+		return mimo.Config{}, err
+	}
+	endpoint, authMode, err := settings.ResolveMiMo(document, getenv)
+	if err != nil {
+		return mimo.Config{}, err
+	}
+	config, _, err := loadMiMoConfig(endpoint, authMode, credential.Resolver{Store: store, Getenv: getenv}.Get)
 	if err != nil {
 		return mimo.Config{}, err
 	}
@@ -162,25 +191,14 @@ func LoadMiMoConfigWithCredentials(getenv func(string) string, store credential.
 	return *config, nil
 }
 
-func loadMiMoConfig(getenv func(string) string, resolve func(credential.Name) (string, error)) (*mimo.Config, bool, error) {
-	endpoint, override, err := endpointOverride(getenv(envMiMoEndpoint), "MiMo", "http", "https")
-	if err != nil {
-		return nil, false, err
-	}
+func loadMiMoConfig(endpoint string, authMode mimo.AuthMode, resolve func(credential.Name) (string, error)) (*mimo.Config, bool, error) {
+	override := endpoint != mimo.DefaultEndpoint
 	key, err := resolve(credential.MiMoAPIKey)
 	if err != nil {
 		return nil, false, err
 	}
 	if key == "" {
 		return nil, override, nil
-	}
-	authMode := mimo.AuthAPIKey
-	switch strings.TrimSpace(getenv(envMiMoAuthMode)) {
-	case "", string(mimo.AuthAPIKey):
-	case string(mimo.AuthBearer):
-		authMode = mimo.AuthBearer
-	default:
-		return nil, false, fmt.Errorf("%s must be api-key or bearer", envMiMoAuthMode)
 	}
 	return &mimo.Config{
 		Endpoint: endpoint, AuthMode: authMode, APIKey: key, Language: mimo.LanguageAuto,
@@ -210,30 +228,11 @@ func newVolcConfig(endpoint string, readLimit int64, auth volcengine.AuthConfig)
 	}
 }
 
-func endpointOverride(raw, provider string, schemes ...string) (string, bool, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", false, nil
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", false, fmt.Errorf("invalid %s endpoint override", provider)
-	}
-	allowed := false
-	for _, scheme := range schemes {
-		allowed = allowed || parsed.Scheme == scheme
-	}
-	if !allowed {
-		return "", false, fmt.Errorf("invalid %s endpoint override scheme", provider)
-	}
-	return raw, true, nil
-}
-
 // String returns a redacted configuration summary.
 func (c RuntimeConfig) String() string {
 	return fmt.Sprintf(
-		"RuntimeConfig{Volcengine:%t MiMo:%t VolcEndpointOverride:%t MiMoEndpointOverride:%t VolcReadLimit:%d}",
-		c.volc != nil, c.mimo != nil, c.volcOverride, c.mimoOverride, c.volcReadLimit,
+		"RuntimeConfig{Volcengine:%t MiMo:%t VolcEndpointOverride:%t MiMoEndpointOverride:%t}",
+		c.volc != nil, c.mimo != nil, c.volcOverride, c.mimoOverride,
 	)
 }
 

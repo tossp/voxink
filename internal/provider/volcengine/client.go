@@ -11,7 +11,8 @@ import (
 	"github.com/tossp/voxink/internal/asr"
 )
 
-const defaultEndpoint = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
+// DefaultEndpoint is the built-in Volcengine V3 secure WebSocket endpoint.
+const DefaultEndpoint = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
 
 // HandshakeError reports a failed WebSocket handshake with only its reliable
 // HTTP status exposed as typed metadata.
@@ -64,7 +65,7 @@ type Client struct {
 // NewClient validates the explicit endpoint, authentication, and read limit.
 func NewClient(config Config) (*Client, error) {
 	if config.Endpoint == "" {
-		config.Endpoint = defaultEndpoint
+		config.Endpoint = DefaultEndpoint
 	}
 	if config.ReadLimit <= 0 {
 		return nil, fmt.Errorf("Volcengine WebSocket read limit must be positive")
