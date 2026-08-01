@@ -14,11 +14,11 @@ VoxInk 是计划中的 Windows 跨应用语音输入工具。
 
 ## 当前状态
 
-`v0.1.0-alpha.1` 是已发布的 Windows amd64 未签名自动化预览版。它是 prerelease，不是 stable 或正式可用产品，也尚未完成真实 Windows 设备、真实供应商账户和端到端验收。
+最新发布状态及下载资产以 [GitHub Releases](https://github.com/tossp/voxink/releases) 为准。[`v0.1.0-alpha.1`](https://github.com/tossp/voxink/releases/tag/v0.1.0-alpha.1) 可作为已发布历史预览查阅。`v0.1.0-alpha.2` 计划作为 Windows amd64 未签名 console validation bundle，包含分层 self-check、受控 Provider smoke 与第三方 notice 治理；发布前本段不表示该版本已经发布。所有预览都是 prerelease，不是 stable 或正式可用产品。
 
 当前代码已实现带 `SessionID` 门控的六态会话、500/600 ms 与 15/60 秒切段、火山 live、MiMo batch fallback、Windows WASAPI 采集、默认 `Ctrl+Shift+Space` 热键、no-activate overlay、脱敏诊断和 Linux/Windows CI。当前只有 overlay 展示，仍无文本注入、Clipboard、SQLite、tray、设置 UI、签名或安装器。
 
-详细能力、隐私边界和已知限制见 [v0.1.0-alpha.1 发布说明](docs/releases/v0.1.0-alpha.1.md)与 [CHANGELOG](CHANGELOG.md)。
+`v0.1.0-alpha.2` 的计划能力、隐私边界和已知限制见 [release notes 源](docs/releases/v0.1.0-alpha.2.md)；历史说明见 [v0.1.0-alpha.1](docs/releases/v0.1.0-alpha.1.md)，版本摘要见 [CHANGELOG](CHANGELOG.md)。
 
 ## 预览下载与运行前提
 
