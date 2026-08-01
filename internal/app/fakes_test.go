@@ -58,6 +58,7 @@ func (c *fakeCapture) Errors() <-chan error   { return c.errors }
 
 type fakeOverlay struct {
 	toggles   chan struct{}
+	exits     chan struct{}
 	updates   chan struct{}
 	closed    chan struct{}
 	closeOnce sync.Once
@@ -67,7 +68,7 @@ type fakeOverlay struct {
 
 func newFakeOverlay() *fakeOverlay {
 	return &fakeOverlay{
-		toggles: make(chan struct{}, 8), updates: make(chan struct{}, 64), closed: make(chan struct{}),
+		toggles: make(chan struct{}, 8), exits: make(chan struct{}, 1), updates: make(chan struct{}, 64), closed: make(chan struct{}),
 	}
 }
 
@@ -82,6 +83,7 @@ func (o *fakeOverlay) Close() error {
 }
 
 func (o *fakeOverlay) Toggles() <-chan struct{} { return o.toggles }
+func (o *fakeOverlay) Exits() <-chan struct{}   { return o.exits }
 
 func (o *fakeOverlay) Update(view View) {
 	o.mu.Lock()

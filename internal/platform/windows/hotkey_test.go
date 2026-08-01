@@ -42,4 +42,10 @@ func TestNewOverlayWithHotkeyRetainsRuntimeRegistrationValues(t *testing.T) {
 	if overlay.hotkey.String() != "Alt+Win+F4" || overlay.hotkey.Modifiers() != modifierAlt|modifierWin|modifierNoRepeat || overlay.hotkey.VirtualKey() != 0x73 {
 		t.Fatalf("overlay hotkey = %q %#x %#x", overlay.hotkey.String(), overlay.hotkey.Modifiers(), overlay.hotkey.VirtualKey())
 	}
+	if overlay.trayOn {
+		t.Fatal("self-check overlay unexpectedly enabled tray controls")
+	}
+	if runtimeOverlay := NewRuntimeOverlayWithHotkey(hotkey); !runtimeOverlay.trayOn {
+		t.Fatal("runtime overlay did not enable tray controls")
+	}
 }

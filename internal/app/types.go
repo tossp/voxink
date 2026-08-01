@@ -77,6 +77,7 @@ type Overlay interface {
 	Run() error
 	Close() error
 	Toggles() <-chan struct{}
+	Exits() <-chan struct{}
 	Update(View)
 }
 
@@ -174,6 +175,8 @@ func (c *Coordinator) Run(ctx context.Context) error {
 			loop = false
 		case <-c.overlay.Toggles():
 			c.handleToggle(ctx)
+		case <-c.overlay.Exits():
+			loop = false
 		case pcm := <-c.capture.PCM():
 			c.handlePCM(pcm)
 		case level := <-c.capture.Levels():
