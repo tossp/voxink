@@ -2,6 +2,9 @@
 
 参考仓库：[BryceWG/BiBi-Keyboard](https://github.com/BryceWG/BiBi-Keyboard)，许可证为 [Apache-2.0](https://github.com/BryceWG/BiBi-Keyboard/blob/main/LICENSE)。VoxInk 仅吸收架构思路并独立重写，不复制大段源码，也不迁移 Android 专属实现。
 
+> [!CAUTION]
+> 许可与归属风险见[第三方许可技术审计](license-audit.md)。BiBi 的 `NOTICE` 包含 Ten VAD“Apache-2.0 with additional conditions”等非标准附加限制；BiBi 与 Ten VAD 当前都不是 VoxInk 的 included software。复制或改编任何 BiBi 源码、资源、模型或构建文件前，必须逐文件核验 provenance、许可证和 NOTICE，并完成必要的法律审查，不能只依赖仓库级 Apache-2.0 标识。
+
 固定参考 commit 为 `741fbb15df7041d11122e43ef5053ff8ff6642b8`。它不是 release `v4.2.1`：`v4.2.1` tag 指向 `8d0fcebd3fe2abe4648d83666fe6329daedf7d68`，固定 commit 比该 tag 前进 7 个提交。关键文件定位与许可证/NOTICE 风险见[BiBi Keyboard 研究证据](research/bibi-keyboard.md)；本页仅保留设计定位。
 
 ## 可借鉴
@@ -29,4 +32,4 @@
 - Android 生命周期、IME composition 和应用内编辑模型；
 - 任何 Android 专用的 UI、构建、依赖与系统集成代码。
 
-Apache-2.0 参考不自动决定 VoxInk 的许可证。VoxInk 自身许可证尚未获授权选择，当前不添加 `LICENSE`；若未来复制、改编或分发任何外部代码，须单独履行其许可证与 NOTICE 要求。
+Apache-2.0 参考不自动决定 VoxInk 的许可证。VoxInk 自身许可证尚未获授权选择，当前不添加 `LICENSE`；若未来复制、改编或分发任何外部代码，须单独履行其许可证、NOTICE、附加条件与逐文件 provenance 要求。

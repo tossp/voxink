@@ -67,6 +67,7 @@ CI artifact 只用于验证自动化构建结果：它是未签名、短期保�
 - 仓库要求的 Linux 自动化以及 Windows 2025 `CGO_ENABLED=1` test、vet、build 已通过；
 - prerelease notes 明确标注构建未签名，并列出缺失能力、已知限制，以及尚未完成的 Windows 真机、第三方服务或真实账户验证；
 - 不把脚手架或未验证能力宣称为可用产品，也不把 CI artifact 本身表述为 release。
+- 分发二进制时同时提供最新的 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)，并按 [`docs/license-audit.md`](docs/license-audit.md) 复核依赖、bundled 组件和归属义务；第三方 notice 不是 VoxInk 自身的许可证。
 
 只有同时满足以下条件，才可以创建 stable GitHub release：
 
@@ -83,7 +84,7 @@ CI artifact 只用于验证自动化构建结果：它是未签名、短期保�
 
 - 不在 issue、PR、commit、日志、截图或 release notes 中记录凭据及其他敏感信息；证据必须先脱敏。
 - 不提交本地运行数据和被 `.gitignore` 排除的敏感文件。
-- 项目尚未选择许可证；未经单独决策，不添加 `LICENSE`，也不声明具体许可证。
+- 项目尚未选择许可证；未经单独决策，不添加 `LICENSE`，也不声明具体许可证。第三方归属与技术审计分别见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 和 [`docs/license-audit.md`](docs/license-audit.md)，不能从上游许可证推导 VoxInk 的许可证。
 
 ## 8. 开始与完成检查
 

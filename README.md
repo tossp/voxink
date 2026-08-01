@@ -14,7 +14,7 @@ VoxInk 是计划中的 Windows 跨应用语音输入工具。
 
 ## 当前状态
 
-`v0.1.0-alpha.1` 是准备发布的 Windows amd64 未签名自动化预览版。它是 prerelease，不是 stable 或正式可用产品，也尚未完成真实 Windows 设备、真实供应商账户和端到端验收。
+`v0.1.0-alpha.1` 是已发布的 Windows amd64 未签名自动化预览版。它是 prerelease，不是 stable 或正式可用产品，也尚未完成真实 Windows 设备、真实供应商账户和端到端验收。
 
 当前代码已实现带 `SessionID` 门控的六态会话、500/600 ms 与 15/60 秒切段、火山 live、MiMo batch fallback、Windows WASAPI 采集、默认 `Ctrl+Shift+Space` 热键、no-activate overlay、脱敏诊断和 Linux/Windows CI。当前只有 overlay 展示，仍无文本注入、Clipboard、SQLite、tray、设置 UI、签名或安装器。
 
@@ -22,7 +22,7 @@ VoxInk 是计划中的 Windows 跨应用语音输入工具。
 
 ## 预览下载与运行前提
 
-发布后可在 [GitHub Releases](https://github.com/tossp/voxink/releases) 获取未签名的 `voxink-windows-amd64.exe` 及其 `.sha256` 文件；不要把有保留期限的 Actions artifact 当作永久 release。当前没有安装器，请在 Windows x64 上直接运行 exe。
+可在 [GitHub Releases](https://github.com/tossp/voxink/releases) 获取未签名的 `voxink-windows-amd64.exe` 及其 `.sha256` 文件；不要把有保留期限的 Actions artifact 当作永久 release。当前没有安装器，请在 Windows x64 上直接运行 exe。
 
 运行前需在本机设置环境变量：火山使用 `VOXINK_VOLC_API_KEY` 与 `VOXINK_VOLC_RESOURCE_ID`，MiMo 使用 `VOXINK_MIMO_API_KEY`；火山 legacy 认证可改用 `VOXINK_VOLC_APP_KEY`、`VOXINK_VOLC_ACCESS_KEY` 与 `VOXINK_VOLC_RESOURCE_ID`。不要将任何值写入仓库、issue 或日志。
 
@@ -38,4 +38,4 @@ VoxInk 是计划中的 Windows 跨应用语音输入工具。
 
 ## 许可证
 
-尚未选择许可证，仓库目前没有 `LICENSE`。预览版不能解读为已经授予任何特定开源许可证；本说明不提供法律结论。相关决策见 [#24](https://github.com/tossp/voxink/issues/24)。
+尚未选择许可证，仓库目前没有 `LICENSE`。预览版不能解读为已经授予任何特定开源许可证；本说明不提供法律结论。第三方组件的归属文本见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)，技术审计见 [`docs/license-audit.md`](docs/license-audit.md)；二者都不是 VoxInk 自身的许可证。相关决策仍由 [#24](https://github.com/tossp/voxink/issues/24) 跟踪。
