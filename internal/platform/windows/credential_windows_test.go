@@ -15,6 +15,7 @@ func TestWindowsCredentialABI(t *testing.T) {
 		wantBlobOffset = 40
 	}
 	var value windowsCredential
+	var _ *byte = value.credentialBlob
 	if got := unsafe.Sizeof(value); got != wantSize {
 		t.Fatalf("windowsCredential size = %d, want %d", got, wantSize)
 	}

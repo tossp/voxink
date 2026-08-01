@@ -33,7 +33,7 @@ type windowsCredential struct {
 	comment            uintptr
 	lastWritten        uint64
 	credentialBlobSize uint32
-	credentialBlob     uintptr
+	credentialBlob     *byte
 	persist            uint32
 	attributeCount     uint32
 	attributes         uintptr
@@ -69,10 +69,10 @@ func (credentialStore) Read(name credential.Name) ([]byte, error) {
 		return nil, credential.ErrStorage
 	}
 	defer procCredFree.Call(uintptr(unsafe.Pointer(native)))
-	if native.credentialBlobSize == 0 || native.credentialBlobSize > credential.MaximumValueBytes || native.credentialBlob == 0 {
+	if native.credentialBlobSize == 0 || native.credentialBlobSize > credential.MaximumValueBytes || native.credentialBlob == nil {
 		return nil, credential.ErrStorage
 	}
-	blob := unsafe.Slice((*byte)(unsafe.Pointer(native.credentialBlob)), int(native.credentialBlobSize))
+	blob := unsafe.Slice(native.credentialBlob, int(native.credentialBlobSize))
 	return append([]byte(nil), blob...), nil
 }
 
@@ -88,7 +88,7 @@ func (credentialStore) Write(name credential.Name, value []byte) error {
 		kind:               credentialTypeGeneric,
 		targetName:         uintptr(unsafe.Pointer(target)),
 		credentialBlobSize: uint32(len(value)),
-		credentialBlob:     uintptr(unsafe.Pointer(&value[0])),
+		credentialBlob:     &value[0],
 		persist:            credentialPersistLocalMachine,
 	}
 	ok, _, _ := procCredWrite.Call(uintptr(unsafe.Pointer(&native)), 0)
