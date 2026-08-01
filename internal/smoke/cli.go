@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/tossp/voxink/internal/credential"
 	"github.com/tossp/voxink/internal/provider/mimo"
 	"github.com/tossp/voxink/internal/provider/volcengine"
 )
@@ -23,7 +24,14 @@ const (
 // Execute parses smoke arguments, runs only the selected Provider, writes one
 // redacted report, and returns a process exit code.
 func Execute(args []string, stdout, stderr io.Writer) int {
-	return execute(args, stdout, stderr, defaultDependencies())
+	return ExecuteWithCredentials(args, stdout, stderr, nil)
+}
+
+// ExecuteWithCredentials runs smoke with Credential Manager precedence over env.
+func ExecuteWithCredentials(args []string, stdout, stderr io.Writer, store credential.Store) int {
+	deps := defaultDependencies()
+	deps.store = store
+	return execute(args, stdout, stderr, deps)
 }
 
 func execute(args []string, stdout, stderr io.Writer, deps dependencies) int {
@@ -84,7 +92,7 @@ func run(parent context.Context, options options, deps dependencies) Report {
 		Code:          CodeInternalFailure,
 	}
 
-	runner, err := deps.provider(options.provider, deps.getenv)
+	runner, err := deps.provider(options.provider, deps.getenv, deps.store)
 	if err != nil {
 		report.Code = CodeConfigMissing
 		return report
@@ -173,7 +181,8 @@ type dependencies struct {
 	now       func() time.Time
 	getenv    func(string) string
 	readAudio func(string) (*audioInput, error)
-	provider  func(Provider, func(string) string) (providerRunner, error)
+	provider  func(Provider, func(string) string, credential.Store) (providerRunner, error)
+	store     credential.Store
 }
 
 func defaultDependencies() dependencies {

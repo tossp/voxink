@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tossp/voxink/internal/asr"
+	"github.com/tossp/voxink/internal/credential"
 	"github.com/tossp/voxink/internal/provider/mimo"
 	"github.com/tossp/voxink/internal/provider/volcengine"
 )
@@ -46,7 +47,7 @@ func TestExecutePassJSONIsRedactedAndReleasesAudio(t *testing.T) {
 			input := &audioInput{wav: []byte("path-canary secret-body"), pcm: []byte("recognized-text-canary"), durationMS: 25}
 			deps := testDependencies()
 			deps.readAudio = func(string) (*audioInput, error) { return input, nil }
-			deps.provider = func(got Provider, _ func(string) string) (providerRunner, error) {
+			deps.provider = func(got Provider, _ func(string) string, _ credential.Store) (providerRunner, error) {
 				if got != provider {
 					t.Fatalf("selected Provider = %s, want %s", got, provider)
 				}
@@ -81,7 +82,7 @@ func TestExecutePassJSONIsRedactedAndReleasesAudio(t *testing.T) {
 func TestOnlySelectedProviderIsConstructedWithoutFallback(t *testing.T) {
 	var calls atomic.Int32
 	deps := testDependencies()
-	deps.provider = func(provider Provider, _ func(string) string) (providerRunner, error) {
+	deps.provider = func(provider Provider, _ func(string) string, _ credential.Store) (providerRunner, error) {
 		calls.Add(1)
 		if provider != ProviderMiMo {
 			t.Fatalf("provider = %s, want mimo", provider)
@@ -124,10 +125,23 @@ func TestRealProviderFactoryLoadsOnlySelectedConfiguration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.provider), func(t *testing.T) {
 			getenv := func(key string) string { return tt.values[key] }
-			if _, err := newProviderRunner(tt.provider, getenv); err != nil {
+			if _, err := newProviderRunner(tt.provider, getenv, nil); err != nil {
 				t.Fatalf("newProviderRunner(%s) error = %v", tt.provider, err)
 			}
 		})
+	}
+}
+
+func TestRealProviderFactoryReadsSelectedCredentialsFromStore(t *testing.T) {
+	store := smokeCredentialStore{values: map[credential.Name]string{
+		credential.VolcAPIKey:     "stored-volc",
+		credential.VolcResourceID: "stored-resource",
+		credential.MiMoAPIKey:     "stored-mimo",
+	}}
+	for _, provider := range []Provider{ProviderVolc, ProviderMiMo} {
+		if _, err := newProviderRunner(provider, func(string) string { return "" }, store); err != nil {
+			t.Fatalf("newProviderRunner(%s) with store error = %v", provider, err)
+		}
 	}
 }
 
@@ -147,7 +161,9 @@ func TestConfigAndAudioFailuresProduceFixedReports(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			deps := testDependencies()
 			if tt.providerErr != nil {
-				deps.provider = func(Provider, func(string) string) (providerRunner, error) { return nil, tt.providerErr }
+				deps.provider = func(Provider, func(string) string, credential.Store) (providerRunner, error) {
+					return nil, tt.providerErr
+				}
 			}
 			if tt.audioErr != nil {
 				deps.readAudio = func(string) (*audioInput, error) { return nil, tt.audioErr }
@@ -211,7 +227,7 @@ func TestProviderErrorClassificationAndStatusMetrics(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			deps := testDependencies()
-			deps.provider = func(Provider, func(string) string) (providerRunner, error) {
+			deps.provider = func(Provider, func(string) string, credential.Store) (providerRunner, error) {
 				return runnerFunc(func(context.Context, *audioInput) (providerResult, error) { return providerResult{}, tt.err }), nil
 			}
 			report := run(context.Background(), options{provider: ProviderVolc, audio: "ignored", timeout: time.Second}, deps)
@@ -238,7 +254,7 @@ func TestProviderErrorClassificationAndStatusMetrics(t *testing.T) {
 func TestTimeoutCancelsRunnerAndReturnsTimeout(t *testing.T) {
 	deps := testDependencies()
 	finished := make(chan struct{})
-	deps.provider = func(Provider, func(string) string) (providerRunner, error) {
+	deps.provider = func(Provider, func(string) string, credential.Store) (providerRunner, error) {
 		return runnerFunc(func(ctx context.Context, _ *audioInput) (providerResult, error) {
 			<-ctx.Done()
 			close(finished)
@@ -326,7 +342,7 @@ func testDependencies() dependencies {
 		readAudio: func(string) (*audioInput, error) {
 			return &audioInput{wav: []byte{1, 2}, pcm: []byte{1, 2}, durationMS: 1}, nil
 		},
-		provider: func(Provider, func(string) string) (providerRunner, error) {
+		provider: func(Provider, func(string) string, credential.Store) (providerRunner, error) {
 			return runnerFunc(func(context.Context, *audioInput) (providerResult, error) {
 				return providerResult{finalReceived: true}, nil
 			}), nil
@@ -370,6 +386,18 @@ type fakeWAVTranscriber struct {
 	text     string
 	received []byte
 }
+
+type smokeCredentialStore struct{ values map[credential.Name]string }
+
+func (s smokeCredentialStore) Read(name credential.Name) ([]byte, error) {
+	value, ok := s.values[name]
+	if !ok {
+		return nil, credential.ErrNotFound
+	}
+	return []byte(value), nil
+}
+func (smokeCredentialStore) Write(credential.Name, []byte) error { return credential.ErrStorage }
+func (smokeCredentialStore) Delete(credential.Name) error        { return credential.ErrStorage }
 
 func (f *fakeWAVTranscriber) TranscribeWAV(_ context.Context, wav []byte) (string, error) {
 	f.received = append([]byte(nil), wav...)

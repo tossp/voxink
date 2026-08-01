@@ -7,6 +7,7 @@ import (
 
 	"github.com/tossp/voxink/internal/app"
 	"github.com/tossp/voxink/internal/asr"
+	"github.com/tossp/voxink/internal/credential"
 	"github.com/tossp/voxink/internal/provider/mimo"
 	"github.com/tossp/voxink/internal/provider/volcengine"
 )
@@ -14,10 +15,10 @@ import (
 // volcFrameBytes is 100 ms * 16,000 samples/s * 1 mono channel * 2 bytes/sample (PCM16).
 const volcFrameBytes = 100 * 16_000 * 2 / 1000
 
-func newProviderRunner(provider Provider, getenv func(string) string) (providerRunner, error) {
+func newProviderRunner(provider Provider, getenv func(string) string, store credential.Store) (providerRunner, error) {
 	switch provider {
 	case ProviderVolc:
-		config, err := app.LoadVolcengineConfig(getenv)
+		config, err := app.LoadVolcengineConfigWithCredentials(getenv, store)
 		if err != nil {
 			return nil, err
 		}
@@ -27,7 +28,7 @@ func newProviderRunner(provider Provider, getenv func(string) string) (providerR
 		}
 		return volcRunner{client: client}, nil
 	case ProviderMiMo:
-		config, err := app.LoadMiMoConfig(getenv)
+		config, err := app.LoadMiMoConfigWithCredentials(getenv, store)
 		if err != nil {
 			return nil, err
 		}
