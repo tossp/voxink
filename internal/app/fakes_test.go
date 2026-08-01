@@ -11,6 +11,7 @@ import (
 	"github.com/tossp/voxink/internal/asr"
 	"github.com/tossp/voxink/internal/audio"
 	"github.com/tossp/voxink/internal/domain"
+	"github.com/tossp/voxink/internal/output"
 )
 
 type fakeCapture struct {
@@ -201,6 +202,7 @@ func (t *fakeTranscriber) Transcribe(ctx context.Context, pcm []byte) (string, e
 type coordinatorHarness struct {
 	capture     *fakeCapture
 	overlay     *fakeOverlay
+	output      *fakeOutputAdapter
 	coordinator *Coordinator
 	cancel      context.CancelFunc
 	done        chan error
@@ -230,6 +232,13 @@ func startHarnessWithOptions(t *testing.T, live asr.LiveRecognizer, batch asr.Se
 			return false
 		}
 	}
+	var outputAdapter *fakeOutputAdapter
+	if options.Output == nil {
+		outputAdapter = newFakeOutputAdapter(output.Result{Mode: output.ModeInjected})
+		options.Output = outputAdapter
+	} else {
+		outputAdapter, _ = options.Output.(*fakeOutputAdapter)
+	}
 	coordinator, err := NewCoordinator(capture, overlay, live, batch, options)
 	if err != nil {
 		t.Fatalf("NewCoordinator() error = %v", err)
@@ -237,7 +246,56 @@ func startHarnessWithOptions(t *testing.T, live asr.LiveRecognizer, batch asr.Se
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- coordinator.Run(ctx) }()
-	return &coordinatorHarness{capture: capture, overlay: overlay, coordinator: coordinator, cancel: cancel, done: done}
+	return &coordinatorHarness{capture: capture, overlay: overlay, output: outputAdapter, coordinator: coordinator, cancel: cancel, done: done}
+}
+
+type fakeOutputAdapter struct {
+	mu       sync.Mutex
+	result   output.Result
+	starts   int
+	sessions []*fakeOutputSession
+}
+
+func newFakeOutputAdapter(result output.Result) *fakeOutputAdapter {
+	return &fakeOutputAdapter{result: result}
+}
+
+func (a *fakeOutputAdapter) StartSession() output.Session {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session := &fakeOutputSession{result: a.result}
+	a.starts++
+	a.sessions = append(a.sessions, session)
+	return session
+}
+
+func (a *fakeOutputAdapter) snapshot() (int, []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var texts []string
+	for _, session := range a.sessions {
+		texts = append(texts, session.snapshot()...)
+	}
+	return a.starts, texts
+}
+
+type fakeOutputSession struct {
+	mu     sync.Mutex
+	result output.Result
+	texts  []string
+}
+
+func (s *fakeOutputSession) Deliver(text string) output.Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.texts = append(s.texts, text)
+	return s.result
+}
+
+func (s *fakeOutputSession) snapshot() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.texts...)
 }
 
 func (h *coordinatorHarness) close(t *testing.T) {
@@ -313,4 +371,37 @@ func finalViews(overlay *fakeOverlay) []View {
 		}
 	}
 	return finals
+}
+
+func waitOutputCount(t *testing.T, adapter *fakeOutputAdapter, count int) []string {
+	t.Helper()
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		_, texts := adapter.snapshot()
+		if len(texts) >= count {
+			return texts
+		}
+		select {
+		case <-time.After(time.Millisecond):
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for %d output calls; texts=%q", count, texts)
+		}
+	}
+}
+
+func waitFinalViewCount(t *testing.T, overlay *fakeOverlay, count int) {
+	t.Helper()
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		if len(finalViews(overlay)) >= count {
+			return
+		}
+		select {
+		case <-overlay.updates:
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for %d Final views; views=%+v", count, overlay.snapshot())
+		}
+	}
 }

@@ -31,8 +31,13 @@ func RunWindows(ctx context.Context, config RuntimeConfig) error {
 		_ = capture.Close()
 		return fmt.Errorf("configure backup batch ASR: %w", transcriberErr)
 	}
+	textOutput, outputErr := windows.NewOutput()
+	if outputErr != nil {
+		_ = capture.Close()
+		return fmt.Errorf("initialize Windows output: %w", outputErr)
+	}
 	overlay := windows.NewOverlay()
-	coordinator, err := NewCoordinator(capture, windowsOverlay{overlay}, client, transcriber, Options{})
+	coordinator, err := NewCoordinator(capture, windowsOverlay{overlay}, client, transcriber, Options{Output: textOutput})
 	if err != nil {
 		_ = capture.Close()
 		_ = overlay.Close()

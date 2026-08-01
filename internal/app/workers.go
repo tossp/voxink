@@ -235,6 +235,7 @@ func (c *Coordinator) cleanupSession(current *activeSession) {
 	current.liveJobs = nil
 	current.batchJobs = nil
 	current.batchDone = nil
+	current.output = nil
 	current.accepted = 0
 	current.batchPending = 0
 	c.active = nil

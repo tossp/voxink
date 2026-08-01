@@ -1,4 +1,4 @@
-// Package windows provides the stage-one Windows capture and no-activate UI adapters.
+// Package windows provides Windows capture, output, and no-activate UI adapters.
 package windows
 
 import (
