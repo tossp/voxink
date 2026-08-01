@@ -36,7 +36,7 @@ func RunWindows(ctx context.Context, config RuntimeConfig) error {
 		_ = capture.Close()
 		return fmt.Errorf("initialize Windows output: %w", outputErr)
 	}
-	overlay := windows.NewOverlayWithHotkey(config.hotkey)
+	overlay := windows.NewRuntimeOverlayWithHotkey(config.hotkey)
 	coordinator, err := NewCoordinator(capture, windowsOverlay{overlay}, client, transcriber, Options{Output: textOutput})
 	if err != nil {
 		_ = capture.Close()
@@ -53,6 +53,7 @@ type windowsOverlay struct {
 func (o windowsOverlay) Run() error               { return o.overlay.Run() }
 func (o windowsOverlay) Close() error             { return o.overlay.Close() }
 func (o windowsOverlay) Toggles() <-chan struct{} { return o.overlay.Toggles() }
+func (o windowsOverlay) Exits() <-chan struct{}   { return o.overlay.Exits() }
 func (o windowsOverlay) Update(view View) {
 	status := windows.ViewIdle
 	switch view.Status {

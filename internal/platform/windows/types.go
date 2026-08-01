@@ -15,6 +15,7 @@ const (
 	errorQueueSize  = 8
 	updateQueueSize = 8
 	toggleQueueSize = 1
+	exitQueueSize   = 1
 	maxViewRunes    = 512
 	maxNoticeRunes  = 256
 )
@@ -152,6 +153,7 @@ func truncateRunes(text string, limit int) string {
 type Overlay struct {
 	updates chan View
 	toggles chan struct{}
+	exits   chan struct{}
 	done    chan struct{}
 
 	viewMu sync.RWMutex
@@ -161,6 +163,8 @@ type Overlay struct {
 	closing atomic.Bool
 	hwnd    atomic.Uintptr
 	hotkey  Hotkey
+	trayOn  bool
+	tray    *trayRuntime
 }
 
 // NewOverlay creates an idle overlay adapter. Run performs platform initialization.
@@ -174,12 +178,23 @@ func NewOverlay() *Overlay {
 
 // NewOverlayWithHotkey creates an idle overlay using a validated shortcut.
 func NewOverlayWithHotkey(hotkey Hotkey) *Overlay {
+	return newOverlay(hotkey, false)
+}
+
+// NewRuntimeOverlayWithHotkey creates the application overlay with native tray controls.
+func NewRuntimeOverlayWithHotkey(hotkey Hotkey) *Overlay {
+	return newOverlay(hotkey, true)
+}
+
+func newOverlay(hotkey Hotkey, trayOn bool) *Overlay {
 	return &Overlay{
 		updates: make(chan View, updateQueueSize),
 		toggles: make(chan struct{}, toggleQueueSize),
+		exits:   make(chan struct{}, exitQueueSize),
 		done:    make(chan struct{}),
 		view:    View{Status: ViewIdle},
 		hotkey:  hotkey,
+		trayOn:  trayOn,
 	}
 }
 
@@ -207,6 +222,9 @@ func (o *Overlay) Update(view View) {
 // Toggles returns non-blocking configured-shortcut requests from WM_HOTKEY.
 func (o *Overlay) Toggles() <-chan struct{} { return o.toggles }
 
+// Exits returns non-blocking requests to shut down the application.
+func (o *Overlay) Exits() <-chan struct{} { return o.exits }
+
 func (o *Overlay) setView(view View) {
 	o.viewMu.Lock()
 	o.view = normalizeView(view)
@@ -222,6 +240,13 @@ func (o *Overlay) currentView() View {
 func (o *Overlay) emitToggle() {
 	select {
 	case o.toggles <- struct{}{}:
+	default:
+	}
+}
+
+func (o *Overlay) emitExit() {
+	select {
+	case o.exits <- struct{}{}:
 	default:
 	}
 }

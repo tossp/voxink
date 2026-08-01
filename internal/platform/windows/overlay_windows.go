@@ -3,6 +3,7 @@
 package windows
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -25,6 +26,7 @@ const (
 	wmHotkey        = 0x0312
 	wmMouseActivate = 0x0021
 	wmAppUpdate     = 0x8001
+	wmTrayCallback  = 0x8002
 
 	maNoActivate     = 3
 	swShowNoActivate = 4
@@ -116,7 +118,7 @@ type windowClass struct {
 }
 
 // Run creates the window and hotkey and owns GetMessage/DispatchMessage on one OS thread.
-func (o *Overlay) Run() error {
+func (o *Overlay) Run() (runErr error) {
 	if o.closing.Load() {
 		return ErrOverlayClosed
 	}
@@ -156,11 +158,22 @@ func (o *Overlay) Run() error {
 			procDestroyWindow.Call(uintptr(hwnd))
 		}
 	}()
+	if o.trayOn {
+		tray := newTrayRuntime(&nativeTrayBackend{}, uintptr(hwnd))
+		o.tray = tray
+		defer func() {
+			runErr = errors.Join(runErr, tray.Close())
+			o.tray = nil
+		}()
+		if err := tray.Open(); err != nil {
+			procDestroyWindow.Call(uintptr(hwnd))
+			return fmt.Errorf("add notification icon: %w", err)
+		}
+	}
 
 	go o.pumpUpdates(hwnd)
 	procShowWindow.Call(uintptr(hwnd), swShowNoActivate)
 	if positioned, _, positionErr := procSetWindowPos.Call(uintptr(hwnd), ^uintptr(0), 24, 24, windowWidth, windowHeight, swpNoActivate); positioned == 0 {
-		procDestroyWindow.Call(uintptr(hwnd))
 		return fmt.Errorf("position no-activate overlay: %w", positionErr)
 	}
 
@@ -243,7 +256,21 @@ func overlayWindowProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uin
 		}
 		return 0
 	case wmAppUpdate:
+		if overlay != nil && overlay.tray != nil {
+			_ = overlay.tray.Update(overlay.currentView())
+		}
 		procInvalidateRect.Call(hwnd, 0, 0)
+		return 0
+	case wmTrayCallback:
+		if overlay != nil && overlay.tray != nil && uint32(wParam) == trayIconID {
+			action, _ := overlay.tray.HandleNotification(uint32(lParam))
+			switch action {
+			case trayActionToggle:
+				overlay.emitToggle()
+			case trayActionExit:
+				overlay.emitExit()
+			}
+		}
 		return 0
 	case wmPaint:
 		if overlay != nil {
@@ -251,7 +278,14 @@ func overlayWindowProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uin
 			return 0
 		}
 	case wmClose:
+		if overlay != nil && overlay.tray != nil && !overlay.closing.Load() {
+			overlay.emitExit()
+			return 0
+		}
 		procUnregisterHotKey.Call(hwnd, hotkeyID)
+		if overlay != nil && overlay.tray != nil {
+			_ = overlay.tray.Close()
+		}
 		procDestroyWindow.Call(hwnd)
 		return 0
 	case wmDestroy:
