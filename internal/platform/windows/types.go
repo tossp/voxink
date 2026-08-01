@@ -28,8 +28,8 @@ var (
 	ErrCaptureClosed = errors.New("capture is closed")
 	// ErrPCMOverflow reports that bounded PCM ingress rejected a callback buffer.
 	ErrPCMOverflow = errors.New("PCM ingress overflow")
-	// ErrHotkeyUnavailable reports that Ctrl+Shift+Space could not be registered.
-	ErrHotkeyUnavailable = errors.New("Ctrl+Shift+Space global hotkey is unavailable")
+	// ErrHotkeyUnavailable reports that the configured global shortcut could not be registered.
+	ErrHotkeyUnavailable = errors.New("configured global hotkey is unavailable")
 	// ErrOverlayClosed reports Run after the overlay was closed.
 	ErrOverlayClosed = errors.New("overlay is closed")
 	// ErrOverlayRunning reports a second concurrent Run call.
@@ -160,15 +160,26 @@ type Overlay struct {
 	running atomic.Bool
 	closing atomic.Bool
 	hwnd    atomic.Uintptr
+	hotkey  Hotkey
 }
 
 // NewOverlay creates an idle overlay adapter. Run performs platform initialization.
 func NewOverlay() *Overlay {
+	hotkey, err := ParseHotkey(DefaultHotkey)
+	if err != nil {
+		panic("invalid built-in hotkey")
+	}
+	return NewOverlayWithHotkey(hotkey)
+}
+
+// NewOverlayWithHotkey creates an idle overlay using a validated shortcut.
+func NewOverlayWithHotkey(hotkey Hotkey) *Overlay {
 	return &Overlay{
 		updates: make(chan View, updateQueueSize),
 		toggles: make(chan struct{}, toggleQueueSize),
 		done:    make(chan struct{}),
 		view:    View{Status: ViewIdle},
+		hotkey:  hotkey,
 	}
 }
 
@@ -193,7 +204,7 @@ func (o *Overlay) Update(view View) {
 	}
 }
 
-// Toggles returns non-blocking Ctrl+Shift+Space requests from WM_HOTKEY.
+// Toggles returns non-blocking configured-shortcut requests from WM_HOTKEY.
 func (o *Overlay) Toggles() <-chan struct{} { return o.toggles }
 
 func (o *Overlay) setView(view View) {

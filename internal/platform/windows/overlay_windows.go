@@ -30,11 +30,7 @@ const (
 	swShowNoActivate = 4
 	swpNoActivate    = 0x0010
 
-	modControl  = 0x0002
-	modShift    = 0x0004
-	modNoRepeat = 0x4000
-	vkSpace     = 0x20
-	hotkeyID    = 1
+	hotkeyID = 1
 
 	lwaAlpha    = 0x00000002
 	dtLeft      = 0x00000000
@@ -149,7 +145,7 @@ func (o *Overlay) Run() error {
 		return ErrOverlayClosed
 	}
 
-	registered, _, registerErr := procRegisterHotKey.Call(uintptr(hwnd), hotkeyID, modControl|modShift|modNoRepeat, vkSpace)
+	registered, _, registerErr := procRegisterHotKey.Call(uintptr(hwnd), hotkeyID, uintptr(o.hotkey.Modifiers()), uintptr(o.hotkey.VirtualKey()))
 	if registered == 0 {
 		procDestroyWindow.Call(uintptr(hwnd))
 		return fmt.Errorf("%w: %v", ErrHotkeyUnavailable, registerErr)

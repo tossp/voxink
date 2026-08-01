@@ -10,6 +10,7 @@ import (
 	"github.com/tossp/voxink/internal/credential"
 	"github.com/tossp/voxink/internal/provider/mimo"
 	"github.com/tossp/voxink/internal/provider/volcengine"
+	"github.com/tossp/voxink/internal/settings"
 )
 
 func TestLoadRuntimeConfigNewAndLegacyVolcAuth(t *testing.T) {
@@ -108,7 +109,7 @@ func TestLoadRuntimeConfigCredentialsAndReadLimitValidation(t *testing.T) {
 	if _, err := LoadRuntimeConfig(env(map[string]string{
 		envVolcAPIKey: "secret", envVolcResourceID: "resource", envMiMoAPIKey: "mimo-secret",
 		envVolcReadLimit: "not-a-number",
-	})); err == nil || !strings.Contains(err.Error(), envVolcReadLimit) {
+	})); err == nil || !strings.Contains(err.Error(), "read limit") {
 		t.Fatalf("invalid read limit error = %v", err)
 	}
 	config, err := LoadRuntimeConfig(env(map[string]string{
@@ -118,8 +119,8 @@ func TestLoadRuntimeConfigCredentialsAndReadLimitValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRuntimeConfig() error = %v", err)
 	}
-	if config.volc.ReadLimit != 65536 || config.volcReadLimit != 65536 {
-		t.Fatalf("read limit = %d / %d", config.volc.ReadLimit, config.volcReadLimit)
+	if config.volc.ReadLimit != 65536 {
+		t.Fatalf("read limit = %d", config.volc.ReadLimit)
 	}
 	if _, err := LoadRuntimeConfig(env(map[string]string{
 		envVolcAPIKey: "new", envVolcAppKey: "legacy", envVolcAccessKey: "legacy-access", envVolcResourceID: "resource",
@@ -132,8 +133,8 @@ func TestLoadRuntimeConfigCredentialsAndReadLimitValidation(t *testing.T) {
 func TestLoadRuntimeConfigEndpointOverridesAndRedaction(t *testing.T) {
 	values := map[string]string{
 		envVolcAPIKey: "volc-super-secret", envVolcResourceID: "resource-secret",
-		envMiMoAPIKey: "mimo-super-secret", envVolcEndpoint: "ws://127.0.0.1:9001/live",
-		envMiMoEndpoint: "http://127.0.0.1:9002/asr", envMiMoAuthMode: "bearer",
+		envMiMoAPIKey: "mimo-super-secret", envVolcEndpoint: "wss://127.0.0.1:9001/live",
+		envMiMoEndpoint: "https://127.0.0.1:9002/asr", envMiMoAuthMode: "bearer",
 	}
 	config, err := LoadRuntimeConfig(env(values))
 	if err != nil {
@@ -155,7 +156,7 @@ func TestLoadRuntimeConfigEndpointOverridesAndRedaction(t *testing.T) {
 	querySecret := "query-secret"
 	_, err = LoadRuntimeConfig(env(map[string]string{
 		envVolcAPIKey: "volc", envVolcResourceID: "resource", envMiMoAPIKey: "key",
-		envMiMoEndpoint: "http://localhost/asr?token=" + querySecret,
+		envMiMoEndpoint: "https://localhost/asr?token=" + querySecret,
 	}))
 	if err == nil || strings.Contains(err.Error(), querySecret) {
 		t.Fatalf("endpoint query validation error leaked secret: %v", err)
@@ -219,11 +220,60 @@ func TestLoadRuntimeConfigStoredLegacyVolcCombination(t *testing.T) {
 	}
 }
 
+func TestLoadRuntimeConfigAppliesSettingsBeforeEnvironmentAndKeepsCredentialPrecedence(t *testing.T) {
+	document := settings.EmptyDocument()
+	for key, value := range map[settings.Key]string{
+		settings.HotkeyKey:             "Win+F6",
+		settings.VolcEndpointKey:       "wss://settings.example/volc",
+		settings.VolcReadLimitBytesKey: "2097152",
+		settings.MiMoEndpointKey:       "https://settings.example/mimo",
+		settings.MiMoAuthModeKey:       "bearer",
+	} {
+		if err := settings.Set(&document, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := configStore{values: map[credential.Name]string{
+		credential.VolcAPIKey: "stored-volc", credential.VolcResourceID: "stored-resource", credential.MiMoAPIKey: "stored-mimo",
+	}}
+	config, err := LoadRuntimeConfigWithSettings(env(map[string]string{
+		envVolcAPIKey: "env-volc", envVolcResourceID: "env-resource", envMiMoAPIKey: "env-mimo",
+		envVolcEndpoint: "wss://env.example/volc", envVolcReadLimit: "3145728",
+		envMiMoEndpoint: "https://env.example/mimo", envMiMoAuthMode: "api-key", "VOXINK_HOTKEY": "Ctrl+A",
+	}), store, configSettingsLoader{document: document})
+	if err != nil {
+		t.Fatalf("LoadRuntimeConfigWithSettings() error = %v", err)
+	}
+	if config.hotkey.String() != "Win+F6" || config.volc.Endpoint != "wss://settings.example/volc" || config.volc.ReadLimit != 2097152 ||
+		config.mimo.Endpoint != "https://settings.example/mimo" || config.mimo.AuthMode != mimo.AuthBearer {
+		t.Fatalf("non-sensitive settings were not applied: hotkey=%s volc=%+v mimo=%+v", config.hotkey, config.volc, config.mimo)
+	}
+	if config.volc.Auth.APIKey != "stored-volc" || config.mimo.APIKey != "stored-mimo" {
+		t.Fatalf("credential precedence regressed: volc=%+v mimo=%+v", config.volc.Auth, config.mimo)
+	}
+}
+
+func TestLoadRuntimeConfigDoesNotIgnoreDamagedSettings(t *testing.T) {
+	_, err := LoadRuntimeConfigWithSettings(env(map[string]string{
+		envVolcAPIKey: "volc", envVolcResourceID: "resource", envMiMoAPIKey: "mimo",
+	}), nil, configSettingsLoader{err: settings.ErrInvalidFile})
+	if !errors.Is(err, settings.ErrInvalidFile) {
+		t.Fatalf("LoadRuntimeConfigWithSettings() error = %v, want ErrInvalidFile", err)
+	}
+}
+
 func env(values map[string]string) func(string) string {
 	return func(key string) string { return values[key] }
 }
 
 type configStore struct{ values map[credential.Name]string }
+
+type configSettingsLoader struct {
+	document settings.Document
+	err      error
+}
+
+func (l configSettingsLoader) Load() (settings.Document, error) { return l.document, l.err }
 
 func (s configStore) Read(name credential.Name) ([]byte, error) {
 	value, ok := s.values[name]
