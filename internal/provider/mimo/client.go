@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -123,6 +122,32 @@ type responseMessage struct {
 	Content string `json:"content"`
 }
 
+// HTTPError is a sanitized non-success MiMo HTTP response.
+type HTTPError struct {
+	StatusCode int
+	category   string
+	code       string
+}
+
+func (e *HTTPError) Error() string {
+	if e.code == "" {
+		return fmt.Sprintf("MiMo HTTP status %d, category %s", e.StatusCode, e.category)
+	}
+	return fmt.Sprintf("MiMo HTTP status %d, category %s, code %s", e.StatusCode, e.category, e.code)
+}
+
+// TransportError reports a MiMo request transport failure without exposing it
+// through the Provider smoke report.
+type TransportError struct{ Err error }
+
+func (e *TransportError) Error() string { return "perform MiMo request: " + e.Err.Error() }
+func (e *TransportError) Unwrap() error { return e.Err }
+
+// ResponseError reports a structurally invalid or over-limit MiMo response.
+type ResponseError struct{ reason string }
+
+func (e *ResponseError) Error() string { return "invalid MiMo response: " + e.reason }
+
 type errorResponse struct {
 	Error struct {
 		Type string `json:"type"`
@@ -136,6 +161,11 @@ func (t *Transcriber) Transcribe(ctx context.Context, pcm []byte) (string, error
 	if err != nil {
 		return "", fmt.Errorf("encode MiMo WAV: %w", err)
 	}
+	return t.TranscribeWAV(ctx, wav)
+}
+
+// TranscribeWAV submits one already validated, complete in-memory WAV file.
+func (t *Transcriber) TranscribeWAV(ctx context.Context, wav []byte) (string, error) {
 	dataURL := dataURLPrefix + base64.StdEncoding.EncodeToString(wav)
 	if len(dataURL) > maxEncodedAudioBytes {
 		return "", fmt.Errorf("MiMo encoded audio exceeds 10 MB limit")
@@ -166,12 +196,12 @@ func (t *Transcriber) Transcribe(ctx context.Context, pcm []byte) (string, error
 
 	response, err := t.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("perform MiMo request: %w", err)
+		return "", &TransportError{Err: err}
 	}
 	defer response.Body.Close()
 	responseBody, err := readBounded(response.Body, maxResponseBytes)
 	if err != nil {
-		return "", fmt.Errorf("read MiMo response: %w", err)
+		return "", &ResponseError{reason: "body exceeds limit or read failed"}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", parseHTTPError(response.StatusCode, responseBody)
@@ -179,10 +209,10 @@ func (t *Transcriber) Transcribe(ctx context.Context, pcm []byte) (string, error
 
 	var decoded chatResponse
 	if err := json.Unmarshal(responseBody, &decoded); err != nil {
-		return "", fmt.Errorf("decode MiMo response: %w", err)
+		return "", &ResponseError{reason: "JSON decoding failed"}
 	}
 	if len(decoded.Choices) == 0 {
-		return "", errors.New("MiMo response has no choices")
+		return "", &ResponseError{reason: "response has no choices"}
 	}
 	return decoded.Choices[0].Message.Content, nil
 }
@@ -210,10 +240,7 @@ func parseHTTPError(status int, body []byte) error {
 			code = safeToken(fmt.Sprint(decoded.Error.Code))
 		}
 	}
-	if code == "" {
-		return fmt.Errorf("MiMo HTTP status %d, category %s", status, category)
-	}
-	return fmt.Errorf("MiMo HTTP status %d, category %s, code %s", status, category, code)
+	return &HTTPError{StatusCode: status, category: category, code: code}
 }
 
 func safeToken(value string) string {

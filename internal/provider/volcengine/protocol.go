@@ -33,7 +33,8 @@ const (
 	compressionGZIP = 0x1
 )
 
-var errInvalidFrame = errors.New("invalid Volcengine protocol frame")
+// ErrProtocol reports a malformed or unsupported Volcengine protocol frame.
+var ErrProtocol = errors.New("invalid Volcengine protocol frame")
 
 // RequestConfig contains the implementation-supported full request options.
 type RequestConfig struct {
@@ -144,14 +145,14 @@ func encodeFrame(messageType, flags, serialization, compression byte, payload []
 
 func decodeServerFrame(frame []byte) (asr.LiveEvent, error) {
 	if len(frame) < 4 {
-		return asr.LiveEvent{}, fmt.Errorf("%w: header is truncated", errInvalidFrame)
+		return asr.LiveEvent{}, fmt.Errorf("%w: header is truncated", ErrProtocol)
 	}
 	if frame[0]>>4 != protocolVersion {
-		return asr.LiveEvent{}, fmt.Errorf("%w: unsupported version %d", errInvalidFrame, frame[0]>>4)
+		return asr.LiveEvent{}, fmt.Errorf("%w: unsupported version %d", ErrProtocol, frame[0]>>4)
 	}
 	headerSize := int(frame[0]&0x0f) * 4
 	if headerSize < 4 || headerSize > len(frame) {
-		return asr.LiveEvent{}, fmt.Errorf("%w: invalid header size %d", errInvalidFrame, headerSize)
+		return asr.LiveEvent{}, fmt.Errorf("%w: invalid header size %d", ErrProtocol, headerSize)
 	}
 	messageType := frame[1] >> 4
 	flags := frame[1] & 0x0f
@@ -165,7 +166,7 @@ func decodeServerFrame(frame []byte) (asr.LiveEvent, error) {
 	case messageServerError:
 		return asr.LiveEvent{}, decodeServerError(compression, payload)
 	default:
-		return asr.LiveEvent{}, fmt.Errorf("%w: unsupported message type %d", errInvalidFrame, messageType)
+		return asr.LiveEvent{}, fmt.Errorf("%w: unsupported message type %d", ErrProtocol, messageType)
 	}
 }
 
@@ -173,14 +174,14 @@ func decodeFullServer(flags, serialization, compression byte, payload []byte) (a
 	event := asr.LiveEvent{ProtocolTerminal: flags&flagLastNoSequence != 0}
 	if flags&flagPositiveSequence != 0 {
 		if len(payload) < 4 {
-			return asr.LiveEvent{}, fmt.Errorf("%w: response sequence is truncated", errInvalidFrame)
+			return asr.LiveEvent{}, fmt.Errorf("%w: response sequence is truncated", ErrProtocol)
 		}
 		event.Sequence = int32(binary.BigEndian.Uint32(payload[:4]))
 		event.HasSequence = true
 		payload = payload[4:]
 	}
 	if serialization != serializationJSON {
-		return asr.LiveEvent{}, fmt.Errorf("%w: response serialization %d is not JSON", errInvalidFrame, serialization)
+		return asr.LiveEvent{}, fmt.Errorf("%w: response serialization %d is not JSON", ErrProtocol, serialization)
 	}
 	body, err := sizedPayload(payload, compression)
 	if err != nil {
@@ -188,7 +189,7 @@ func decodeFullServer(flags, serialization, compression byte, payload []byte) (a
 	}
 	var decoded responsePayload
 	if err := json.Unmarshal(body, &decoded); err != nil {
-		return asr.LiveEvent{}, fmt.Errorf("%w: decode response JSON: %v", errInvalidFrame, err)
+		return asr.LiveEvent{}, fmt.Errorf("%w: decode response JSON: %v", ErrProtocol, err)
 	}
 	event.Text = decoded.Result.Text
 	for _, utterance := range decoded.Result.Utterances {
@@ -202,7 +203,7 @@ func decodeFullServer(flags, serialization, compression byte, payload []byte) (a
 
 func decodeServerError(compression byte, payload []byte) error {
 	if len(payload) < 8 {
-		return fmt.Errorf("%w: error response is truncated", errInvalidFrame)
+		return fmt.Errorf("%w: error response is truncated", ErrProtocol)
 	}
 	code := binary.BigEndian.Uint32(payload[:4])
 	_, err := sizedPayload(payload[4:], compression)
@@ -214,11 +215,11 @@ func decodeServerError(compression byte, payload []byte) error {
 
 func sizedPayload(payload []byte, compression byte) ([]byte, error) {
 	if len(payload) < 4 {
-		return nil, fmt.Errorf("%w: payload size is truncated", errInvalidFrame)
+		return nil, fmt.Errorf("%w: payload size is truncated", ErrProtocol)
 	}
 	size := binary.BigEndian.Uint32(payload[:4])
 	if uint64(size) != uint64(len(payload)-4) {
-		return nil, fmt.Errorf("%w: declared payload size %d differs from %d", errInvalidFrame, size, len(payload)-4)
+		return nil, fmt.Errorf("%w: declared payload size %d differs from %d", ErrProtocol, size, len(payload)-4)
 	}
 	body := payload[4:]
 	switch compression {
@@ -227,18 +228,18 @@ func sizedPayload(payload []byte, compression byte) ([]byte, error) {
 	case compressionGZIP:
 		reader, err := gzip.NewReader(bytes.NewReader(body))
 		if err != nil {
-			return nil, fmt.Errorf("%w: open gzip payload: %v", errInvalidFrame, err)
+			return nil, fmt.Errorf("%w: open gzip payload: %v", ErrProtocol, err)
 		}
 		decompressed, readErr := io.ReadAll(reader)
 		closeErr := reader.Close()
 		if readErr != nil {
-			return nil, fmt.Errorf("%w: decompress payload: %v", errInvalidFrame, readErr)
+			return nil, fmt.Errorf("%w: decompress payload: %v", ErrProtocol, readErr)
 		}
 		if closeErr != nil {
-			return nil, fmt.Errorf("%w: close gzip payload: %v", errInvalidFrame, closeErr)
+			return nil, fmt.Errorf("%w: close gzip payload: %v", ErrProtocol, closeErr)
 		}
 		return decompressed, nil
 	default:
-		return nil, fmt.Errorf("%w: unsupported compression %d", errInvalidFrame, compression)
+		return nil, fmt.Errorf("%w: unsupported compression %d", ErrProtocol, compression)
 	}
 }

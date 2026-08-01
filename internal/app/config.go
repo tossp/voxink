@@ -40,73 +40,116 @@ type RuntimeConfig struct {
 
 // LoadRuntimeConfig reads stage-one settings without persistence or logging.
 func LoadRuntimeConfig(getenv func(string) string) (RuntimeConfig, error) {
-	readLimit := DefaultVolcengineReadLimit
-	if raw := strings.TrimSpace(getenv(envVolcReadLimit)); raw != "" {
-		parsed, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || parsed <= 0 {
-			return RuntimeConfig{}, fmt.Errorf("%s must be a positive integer", envVolcReadLimit)
-		}
-		readLimit = parsed
-	}
-
-	volcEndpoint, volcOverride, err := endpointOverride(getenv(envVolcEndpoint), "Volcengine", "ws", "wss")
+	volcConfig, volcOverride, readLimit, err := loadVolcengineConfig(getenv)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
-	mimoEndpoint, mimoOverride, err := endpointOverride(getenv(envMiMoEndpoint), "MiMo", "http", "https")
+	mimoConfig, mimoOverride, err := loadMiMoConfig(getenv)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
 
 	config := RuntimeConfig{
 		route:        asr.StageOneRoute(),
+		volc:         volcConfig,
+		mimo:         mimoConfig,
 		volcOverride: volcOverride, mimoOverride: mimoOverride, volcReadLimit: readLimit,
 	}
 	if err := asr.ValidateStageOneRoute(config.route, asr.DefaultRegistry()); err != nil {
 		return RuntimeConfig{}, fmt.Errorf("validate fixed stage-one ASR route: %w", err)
+	}
+	if err := config.validateStageOne(); err != nil {
+		return RuntimeConfig{}, err
+	}
+	return config, nil
+}
+
+// LoadVolcengineConfig reads and validates only the existing Volcengine
+// environment variables. It does not inspect MiMo configuration.
+func LoadVolcengineConfig(getenv func(string) string) (volcengine.Config, error) {
+	config, _, _, err := loadVolcengineConfig(getenv)
+	if err != nil {
+		return volcengine.Config{}, err
+	}
+	if config == nil {
+		return volcengine.Config{}, ErrMissingVolcengineCredentials
+	}
+	return *config, nil
+}
+
+func loadVolcengineConfig(getenv func(string) string) (*volcengine.Config, bool, int64, error) {
+	readLimit := DefaultVolcengineReadLimit
+	if raw := strings.TrimSpace(getenv(envVolcReadLimit)); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed <= 0 {
+			return nil, false, 0, fmt.Errorf("%s must be a positive integer", envVolcReadLimit)
+		}
+		readLimit = parsed
+	}
+	endpoint, override, err := endpointOverride(getenv(envVolcEndpoint), "Volcengine", "ws", "wss")
+	if err != nil {
+		return nil, false, 0, err
 	}
 	apiKey := getenv(envVolcAPIKey)
 	resourceID := getenv(envVolcResourceID)
 	appKey := getenv(envVolcAppKey)
 	accessKey := getenv(envVolcAccessKey)
 	if apiKey != "" && (appKey != "" || accessKey != "") {
-		return RuntimeConfig{}, fmt.Errorf("Volcengine new and legacy credentials are mutually exclusive")
+		return nil, false, 0, fmt.Errorf("Volcengine new and legacy credentials are mutually exclusive")
 	}
 	if apiKey != "" {
 		if resourceID == "" {
-			return RuntimeConfig{}, fmt.Errorf("%s is required with %s", envVolcResourceID, envVolcAPIKey)
+			return nil, false, 0, fmt.Errorf("%s is required with %s", envVolcResourceID, envVolcAPIKey)
 		}
-		config.volc = newVolcConfig(volcEndpoint, readLimit, volcengine.AuthConfig{
+		return newVolcConfig(endpoint, readLimit, volcengine.AuthConfig{
 			Mode: volcengine.AuthAPIKey, APIKey: apiKey, ResourceID: resourceID,
-		})
+		}), override, readLimit, nil
 	} else if appKey != "" || accessKey != "" {
 		if appKey == "" || accessKey == "" || resourceID == "" {
-			return RuntimeConfig{}, fmt.Errorf("legacy Volcengine auth requires app key, access key, and resource ID")
+			return nil, false, 0, fmt.Errorf("legacy Volcengine auth requires app key, access key, and resource ID")
 		}
-		config.volc = newVolcConfig(volcEndpoint, readLimit, volcengine.AuthConfig{
+		return newVolcConfig(endpoint, readLimit, volcengine.AuthConfig{
 			Mode: volcengine.AuthLegacy, AppKey: appKey, AccessKey: accessKey, ResourceID: resourceID,
-		})
+		}), override, readLimit, nil
 	} else if resourceID != "" {
-		return RuntimeConfig{}, fmt.Errorf("Volcengine resource ID was set without credentials")
+		return nil, false, 0, fmt.Errorf("Volcengine resource ID was set without credentials")
 	}
+	return nil, override, readLimit, nil
+}
 
-	if key := getenv(envMiMoAPIKey); key != "" {
-		authMode := mimo.AuthAPIKey
-		switch strings.TrimSpace(getenv(envMiMoAuthMode)) {
-		case "", string(mimo.AuthAPIKey):
-		case string(mimo.AuthBearer):
-			authMode = mimo.AuthBearer
-		default:
-			return RuntimeConfig{}, fmt.Errorf("%s must be api-key or bearer", envMiMoAuthMode)
-		}
-		config.mimo = &mimo.Config{
-			Endpoint: mimoEndpoint, AuthMode: authMode, APIKey: key, Language: mimo.LanguageAuto,
-		}
+// LoadMiMoConfig reads and validates only the existing MiMo environment
+// variables. It does not inspect Volcengine configuration.
+func LoadMiMoConfig(getenv func(string) string) (mimo.Config, error) {
+	config, _, err := loadMiMoConfig(getenv)
+	if err != nil {
+		return mimo.Config{}, err
 	}
-	if err := config.validateStageOne(); err != nil {
-		return RuntimeConfig{}, err
+	if config == nil {
+		return mimo.Config{}, ErrMissingMiMoCredentials
 	}
-	return config, nil
+	return *config, nil
+}
+
+func loadMiMoConfig(getenv func(string) string) (*mimo.Config, bool, error) {
+	endpoint, override, err := endpointOverride(getenv(envMiMoEndpoint), "MiMo", "http", "https")
+	if err != nil {
+		return nil, false, err
+	}
+	key := getenv(envMiMoAPIKey)
+	if key == "" {
+		return nil, override, nil
+	}
+	authMode := mimo.AuthAPIKey
+	switch strings.TrimSpace(getenv(envMiMoAuthMode)) {
+	case "", string(mimo.AuthAPIKey):
+	case string(mimo.AuthBearer):
+		authMode = mimo.AuthBearer
+	default:
+		return nil, false, fmt.Errorf("%s must be api-key or bearer", envMiMoAuthMode)
+	}
+	return &mimo.Config{
+		Endpoint: endpoint, AuthMode: authMode, APIKey: key, Language: mimo.LanguageAuto,
+	}, override, nil
 }
 
 func (c RuntimeConfig) validateStageOne() error {

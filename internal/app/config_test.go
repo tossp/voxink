@@ -161,6 +161,30 @@ func TestLoadRuntimeConfigEndpointOverridesAndRedaction(t *testing.T) {
 	}
 }
 
+func TestProviderSpecificConfigLoadersInspectOnlySelectedProvider(t *testing.T) {
+	volcValues := map[string]string{envVolcAPIKey: "volc", envVolcResourceID: "resource"}
+	volcGetenv := func(key string) string {
+		if strings.HasPrefix(key, "VOXINK_MIMO_") {
+			t.Fatalf("Volcengine loader inspected %s", key)
+		}
+		return volcValues[key]
+	}
+	if _, err := LoadVolcengineConfig(volcGetenv); err != nil {
+		t.Fatalf("LoadVolcengineConfig() error = %v", err)
+	}
+
+	mimoValues := map[string]string{envMiMoAPIKey: "mimo"}
+	mimoGetenv := func(key string) string {
+		if strings.HasPrefix(key, "VOXINK_VOLC_") {
+			t.Fatalf("MiMo loader inspected %s", key)
+		}
+		return mimoValues[key]
+	}
+	if _, err := LoadMiMoConfig(mimoGetenv); err != nil {
+		t.Fatalf("LoadMiMoConfig() error = %v", err)
+	}
+}
+
 func env(values map[string]string) func(string) string {
 	return func(key string) string { return values[key] }
 }

@@ -38,6 +38,17 @@ voxink self-check --mode=interactive --timeout=15s --json
 
 JSON 只写入 stdout，交互提示与参数错误写入 stderr。报告不会包含 PCM、设备名、窗口标题、路径、环境变量值、识别文本或原始错误；interactive 报告中的 `focus_confirmation_required` 仍须人工确认，不能由程序自动判定。完整说明见[分层自检](docs/self-check.md)。
 
+## Provider 受控冒烟
+
+只有用户明确提供已授权 WAV 并确认发送时，才会运行单一 Provider 冒烟；命令不采集麦克风、不触发 fallback，也不会在普通启动或 CI 中自动执行：
+
+```text
+voxink smoke volc --audio <authorized.wav> --confirm-send --json
+voxink smoke mimo --audio <authorized.wav> --confirm-send --json
+```
+
+输入限制为 2 MiB、最长 60 秒的 PCM16 LE / 16 kHz / mono WAV。报告不包含路径、音频、识别文本、响应正文、endpoint、凭据或原始错误。真实运行前必须复核账户权限及当期供应商政策；mock 结果不能替代真实账户证据。完整说明见 [Provider 受控冒烟命令](docs/provider-smoke.md)。
+
 ## 开发进度
 
 开发状态与后续计划见 [开发路线图](docs/roadmap.md)。

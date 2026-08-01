@@ -13,6 +13,19 @@ import (
 
 const defaultEndpoint = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
 
+// HandshakeError reports a failed WebSocket handshake with only its reliable
+// HTTP status exposed as typed metadata.
+type HandshakeError struct {
+	StatusCode int
+	Err        error
+}
+
+func (e *HandshakeError) Error() string {
+	return fmt.Sprintf("dial Volcengine WebSocket (HTTP status %d): %v", e.StatusCode, e.Err)
+}
+
+func (e *HandshakeError) Unwrap() error { return e.Err }
+
 // AuthMode selects one mutually exclusive Volcengine handshake credential set.
 type AuthMode string
 
@@ -76,7 +89,7 @@ func (c *Client) Dial(ctx context.Context) (asr.LiveSession, error) {
 		if response != nil {
 			status = response.StatusCode
 		}
-		return nil, fmt.Errorf("dial Volcengine WebSocket (HTTP status %d): %w", status, err)
+		return nil, &HandshakeError{StatusCode: status, Err: err}
 	}
 	conn.SetReadLimit(c.config.ReadLimit)
 	session := &Session{conn: conn}
