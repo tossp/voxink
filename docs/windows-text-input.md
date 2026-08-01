@@ -1,14 +1,13 @@
 # Windows 文本输入边界
 
-## 可选最终输出方式
+## 已实现的最终输出方式
 
 | 方式 | 适合情况 | 主要边界 |
 | --- | --- | --- |
 | `SendInput` | 目标窗口与前台焦点可验证，且注入安全 | 受权限隔离、目标控件与焦点变化影响；不是 IME composition |
-| `Clipboard Paste` | 注入文本不适用但粘贴可行 | 会临时使用剪贴板，粘贴仍取决于目标应用与焦点 |
-| `Copy Only` | 焦点变化、目标不安全或任何注入失败 | 只将最终文本复制，由用户自行粘贴，优先保证不误投递 |
+| `Copy Only` | 焦点变化、无启动目标、密码框/安全性无法确认，或 `SendInput` 返回 0 | 将完整 final 留在剪贴板，绝不自动粘贴；UI 提示用户手动粘贴 |
 
-默认策略由设置配置。执行时必须重新检查前台上下文；一旦焦点变化、无法判断安全性或执行失败，即降级为 `Copy Only`，并在 UI 中说明结果。
+当前实现会在会话开始时记录前台窗口，final 前重新核验同一目标，并只用 `KEYEVENTF_UNICODE` 发送 UTF-16 code units。partial 永不发送。`SendInput` 部分成功时不会再复制，以避免重复文本；注入与剪贴板都失败时会话失败。
 
 TSF、`SendInput`、Unicode、UI Automation 与 IMM32 的官方证据定位见[Windows API 研究记录](research/windows-apis.md)；本页仅保留产品边界。
 
@@ -25,4 +24,6 @@ TSF、`SendInput`、Unicode、UI Automation 与 IMM32 的官方证据定位见[W
 
 ## 安全限制
 
-不尝试绕过 Windows 权限边界、UAC、受保护窗口、目标应用限制或企业防护策略。高权限窗口、远程桌面、密码框、焦点不确定以及无法安全注入的控件都应走 `Copy Only`。是否允许特定应用、如何处理剪贴板恢复和快捷键冲突，均是后续实现前需测试的开放问题。
+不尝试绕过 Windows 权限边界、UAC、受保护窗口、目标应用限制或企业防护策略。密码框、焦点不确定以及无法安全检查的控件走 `Copy Only`。当前不恢复旧剪贴板，因为 Copy Only 必须保留 final 供用户手动粘贴；未实现 Clipboard Paste、TSF 或 UI Automation。
+
+当前 Win32 路径仅完成了 fake 驱动的自动化测试和 Windows 交叉编译，尚未在真实 Windows 桌面验证前台窗口核验、密码框识别、UIPI/高权限窗口、不同应用控件兼容性及剪贴板占用时的行为。

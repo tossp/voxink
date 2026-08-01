@@ -11,6 +11,7 @@ import (
 	"github.com/tossp/voxink/internal/audio"
 	"github.com/tossp/voxink/internal/diagnostic"
 	"github.com/tossp/voxink/internal/domain"
+	"github.com/tossp/voxink/internal/output"
 	"github.com/tossp/voxink/internal/session"
 )
 
@@ -28,6 +29,7 @@ type activeSession struct {
 	accepted  int
 	stopped   bool
 	finalSent bool
+	output    output.Session
 
 	live          asr.LiveSession
 	liveHealthy   bool
@@ -107,6 +109,9 @@ func (c *Coordinator) startSession(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
 	current := &activeSession{
 		id: id, ctx: ctx, cancel: cancel, segmenter: audio.NewProgressiveSegmenter(),
+	}
+	if c.output != nil {
+		current.output = c.output.StartSession()
 	}
 	c.controller = controller
 	c.active = current
@@ -307,12 +312,26 @@ func (c *Coordinator) finalize(current *activeSession, text string) {
 		c.failActive("Session finalization failed", diagnostic.StageDelivery, diagnostic.CodeStateRejected)
 		return
 	}
-	c.publish(View{Status: ViewTranscribing, Final: text})
+	result := output.Result{Mode: output.ModeInjected}
+	if current.output != nil {
+		result = current.output.Deliver(text)
+	}
+	var message string
+	switch result.Mode {
+	case output.ModeInjected:
+		message = OutputInjectedMessage
+	case output.ModeCopied:
+		message = OutputCopiedMessage
+	default:
+		c.failActive("Output failed", diagnostic.StageDelivery, "")
+		return
+	}
 	if !c.controller.CompleteDelivery(current.id) {
 		c.failActive("Session finalization failed", diagnostic.StageDelivery, diagnostic.CodeStateRejected)
 		return
 	}
 	c.recordDiagnostic(current, diagnostic.KindSessionCompleted, diagnostic.StageDelivery, "", "")
+	c.publish(View{Status: ViewIdle, Final: message})
 	c.cleanupSession(current)
 }
 

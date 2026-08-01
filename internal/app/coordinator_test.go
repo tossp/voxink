@@ -40,7 +40,7 @@ func TestLiveSuccessWaitsForProtocolTerminalAndSkipsMiMo(t *testing.T) {
 		t.Fatal("capture stop became Final before protocol terminal")
 	}
 	live.reads <- fakeLiveRead{event: asr.LiveEvent{Text: "完整结果", ProtocolTerminal: true}}
-	final := waitView(t, harness.overlay, func(view View) bool { return view.Final == "完整结果" }, "live final")
+	final := waitView(t, harness.overlay, func(view View) bool { return view.Final == OutputInjectedMessage }, "live final")
 	if final.Partial != "" {
 		t.Fatalf("final view retained provisional partial %q", final.Partial)
 	}
@@ -49,6 +49,9 @@ func TestLiveSuccessWaitsForProtocolTerminalAndSkipsMiMo(t *testing.T) {
 	}
 	if got := len(finalViews(harness.overlay)); got != 1 {
 		t.Fatalf("Final updates = %d, want 1", got)
+	}
+	if _, texts := harness.output.snapshot(); !reflect.DeepEqual(texts, []string{"完整结果"}) {
+		t.Fatalf("output texts = %q, want complete Final", texts)
 	}
 }
 
@@ -336,12 +339,13 @@ func TestLiveFailureReplaysRetainedAndFutureSegmentsInOrder(t *testing.T) {
 	waitPCMCall(t, batch.calls, "retained MiMo segment")
 	waitPCMCall(t, batch.calls, "future MiMo segment before stop")
 	harness.overlay.toggles <- struct{}{}
-	final := waitView(t, harness.overlay, func(view View) bool { return view.Final != "" }, "fallback final")
-	if final.Final != "one two" {
-		t.Fatalf("Final = %q, want %q", final.Final, "one two")
+	waitView(t, harness.overlay, func(view View) bool { return view.Final != "" }, "fallback final")
+	_, texts := harness.output.snapshot()
+	if !reflect.DeepEqual(texts, []string{"one two"}) {
+		t.Fatalf("output texts = %q, want %q", texts, "one two")
 	}
-	if strings.Contains(final.Final, "old provisional") {
-		t.Fatalf("old provisional became final: %q", final.Final)
+	if strings.Contains(strings.Join(texts, ""), "old provisional") {
+		t.Fatalf("old provisional became final output: %q", texts)
 	}
 	if !reflect.DeepEqual(order, []byte{1, 2, 0}) {
 		t.Fatalf("MiMo segment order = %v, want [1 2 0]", order)
@@ -428,7 +432,8 @@ func TestToggleRestartAndCancellationCleanupHaveNoDuplicateFinal(t *testing.T) {
 		waitSignal(t, live.finished, "live finish")
 		text := string(rune('A' + index))
 		live.reads <- fakeLiveRead{event: asr.LiveEvent{Text: text, ProtocolTerminal: true}}
-		waitView(t, harness.overlay, func(view View) bool { return view.Final == text }, "session final")
+		waitOutputCount(t, harness.output, index+1)
+		waitFinalViewCount(t, harness.overlay, index+1)
 	}
 	if got := len(finalViews(harness.overlay)); got != 2 {
 		t.Fatalf("Final updates = %d, want 2", got)

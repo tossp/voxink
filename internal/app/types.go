@@ -8,10 +8,18 @@ import (
 	"github.com/tossp/voxink/internal/asr"
 	"github.com/tossp/voxink/internal/diagnostic"
 	"github.com/tossp/voxink/internal/domain"
+	"github.com/tossp/voxink/internal/output"
 )
 
 // AudioPrivacyNotice is the fixed stage-one active-overlay disclosure.
 const AudioPrivacyNotice = "隐私提示：麦克风音频会发送至火山进行实时识别；主线路失败时，同一会话音频可能发送至 MiMo。原始音频默认仅驻留内存且不保存；供应商数据政策请以账户及当期条款为准。"
+
+const (
+	// OutputInjectedMessage is the fixed successful injection status.
+	OutputInjectedMessage = "已输入"
+	// OutputCopiedMessage is the fixed Copy Only status.
+	OutputCopiedMessage = "已复制，请手动粘贴"
+)
 
 var (
 	// ErrMissingCapture reports an incomplete application assembly.
@@ -83,6 +91,7 @@ type Options struct {
 	NewSessionID   SessionIDGenerator
 	DetectSpeech   SpeechDetector
 	DiagnosticSink diagnostic.Sink
+	Output         output.Adapter
 	WorkerBuffer   int
 	LivePCMBuffer  int
 }
@@ -93,6 +102,7 @@ type Coordinator struct {
 	overlay Overlay
 	live    asr.LiveRecognizer
 	batch   asr.SegmentTranscriber
+	output  output.Adapter
 	options Options
 
 	controller  sessionController
@@ -140,7 +150,7 @@ func NewCoordinator(capture Capture, overlay Overlay, live asr.LiveRecognizer, b
 		options.DiagnosticSink = diagnostic.NoopSink()
 	}
 	return &Coordinator{
-		capture: capture, overlay: overlay, live: live, batch: batch,
+		capture: capture, overlay: overlay, live: live, batch: batch, output: options.Output,
 		options: options, workers: make(chan workerEvent, options.WorkerBuffer), diagnostics: options.DiagnosticSink,
 	}, nil
 }
