@@ -11,6 +11,7 @@ import (
 )
 
 func main() {
+	handleSelfCheck()
 	fmt.Fprintln(os.Stderr, "VoxInk stopped:", windows.ErrCGODisabled)
 	os.Exit(1)
 }
