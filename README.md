@@ -1,5 +1,9 @@
 # VoxInk（声墨）
 
+[![CI](https://github.com/tossp/voxink/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tossp/voxink/actions/workflows/ci.yml?query=branch%3Amain)
+
+徽章仅显示 `main` 上 CI workflow 的运行状态；各分支结果以对应 Actions run 为准。CI 上传的是保留 14 天的未签名验证构建，不是 release。
+
 VoxInk 是计划中的 Windows 跨应用语音输入工具。
 
 ## 项目计划
