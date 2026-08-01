@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tossp/voxink/internal/credential"
 	"github.com/tossp/voxink/internal/selfcheck"
 	"github.com/tossp/voxink/internal/smoke"
 )
@@ -14,7 +15,7 @@ import (
 func TestDispatchCommandLeavesNoArgumentsAndUnknownArgumentsUnchanged(t *testing.T) {
 	for _, args := range [][]string{nil, {"unknown"}} {
 		var stdout, stderr bytes.Buffer
-		handled, code := dispatchCommand(args, &stdout, &stderr)
+		handled, code := dispatchCommand(args, strings.NewReader(""), &stdout, &stderr)
 		if handled || code != 0 || stdout.Len() != 0 || stderr.Len() != 0 {
 			t.Fatalf("dispatchCommand(%q) = %t/%d stdout=%q stderr=%q", args, handled, code, stdout.String(), stderr.String())
 		}
@@ -23,7 +24,7 @@ func TestDispatchCommandLeavesNoArgumentsAndUnknownArgumentsUnchanged(t *testing
 
 func TestDispatchCommandKeepsSelfCheckCompatible(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	handled, code := dispatchCommand([]string{"self-check", "--mode=static", "--json"}, &stdout, &stderr)
+	handled, code := dispatchCommand([]string{"self-check", "--mode=static", "--json"}, strings.NewReader(""), &stdout, &stderr)
 	if !handled || code != 0 {
 		t.Fatalf("dispatch self-check = %t/%d; stderr=%q", handled, code, stderr.String())
 	}
@@ -38,7 +39,7 @@ func TestDispatchCommandKeepsSelfCheckCompatible(t *testing.T) {
 
 func TestDispatchSmokeBeforeApplicationStartup(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	handled, code := dispatchCommand([]string{"smoke", "volc", "--audio", "secret-path-canary"}, &stdout, &stderr)
+	handled, code := dispatchCommand([]string{"smoke", "volc", "--audio", "secret-path-canary"}, strings.NewReader(""), &stdout, &stderr)
 	if !handled || code != 2 {
 		t.Fatalf("dispatch smoke = %t/%d", handled, code)
 	}
@@ -63,6 +64,7 @@ func TestDispatchSmokeMissingConfigIsRedactedBeforeApplicationStartup(t *testing
 	var stdout, stderr bytes.Buffer
 	handled, code := dispatchCommand(
 		[]string{"smoke", "volc", "--audio", canary, "--confirm-send", "--json"},
+		strings.NewReader(""),
 		&stdout,
 		&stderr,
 	)
@@ -92,4 +94,44 @@ func TestDispatchSmokeMissingConfigIsRedactedBeforeApplicationStartup(t *testing
 		strings.Contains(stdout.String(), "dispatch-secret-canary") || strings.Contains(stderr.String(), "dispatch-secret-canary") {
 		t.Fatalf("smoke output leaked audio path: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
+}
+
+func TestDispatchCredentialSetReadsStdinWithoutLeakingIt(t *testing.T) {
+	const canary = "stdin-secret-canary"
+	store := &commandCredentialStore{values: make(map[credential.Name][]byte)}
+	var stdout, stderr bytes.Buffer
+	handled, code := dispatchCommandWithStore(
+		[]string{"config", "credential", "set", string(credential.MiMoAPIKey)},
+		strings.NewReader(canary+"\n"), &stdout, &stderr, store,
+	)
+	if !handled || code != 0 || stdout.String() != "VoxInk credential: configured\n" || stderr.Len() != 0 {
+		t.Fatalf("dispatch credential = %t/%d stdout=%q stderr=%q", handled, code, stdout.String(), stderr.String())
+	}
+	if got := string(store.values[credential.MiMoAPIKey]); got != canary {
+		t.Fatalf("stored value = %q", got)
+	}
+	if strings.Contains(stdout.String()+stderr.String(), canary) {
+		t.Fatal("credential command leaked stdin")
+	}
+}
+
+type commandCredentialStore struct{ values map[credential.Name][]byte }
+
+func (s *commandCredentialStore) Read(name credential.Name) ([]byte, error) {
+	value, ok := s.values[name]
+	if !ok {
+		return nil, credential.ErrNotFound
+	}
+	return append([]byte(nil), value...), nil
+}
+func (s *commandCredentialStore) Write(name credential.Name, value []byte) error {
+	s.values[name] = append([]byte(nil), value...)
+	return nil
+}
+func (s *commandCredentialStore) Delete(name credential.Name) error {
+	if _, ok := s.values[name]; !ok {
+		return credential.ErrNotFound
+	}
+	delete(s.values, name)
+	return nil
 }

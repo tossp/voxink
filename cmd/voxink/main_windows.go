@@ -10,11 +10,12 @@ import (
 	"os/signal"
 
 	"github.com/tossp/voxink/internal/app"
+	"github.com/tossp/voxink/internal/platform/windows"
 )
 
 func main() {
 	handleCommand()
-	config, err := app.LoadRuntimeConfig(os.Getenv)
+	config, err := app.LoadRuntimeConfigWithCredentials(os.Getenv, windows.NewCredentialStore())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "VoxInk configuration error:", err)
 		os.Exit(1)

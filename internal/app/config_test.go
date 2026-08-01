@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tossp/voxink/internal/asr"
+	"github.com/tossp/voxink/internal/credential"
 	"github.com/tossp/voxink/internal/provider/mimo"
 	"github.com/tossp/voxink/internal/provider/volcengine"
 )
@@ -185,6 +186,51 @@ func TestProviderSpecificConfigLoadersInspectOnlySelectedProvider(t *testing.T) 
 	}
 }
 
+func TestLoadRuntimeConfigUsesStoredCredentialsBeforeEnvironment(t *testing.T) {
+	store := configStore{values: map[credential.Name]string{
+		credential.VolcAPIKey:     "stored-volc",
+		credential.VolcResourceID: "stored-resource",
+		credential.MiMoAPIKey:     "stored-mimo",
+	}}
+	config, err := LoadRuntimeConfigWithCredentials(env(map[string]string{
+		envVolcAPIKey: "env-volc", envVolcResourceID: "env-resource", envMiMoAPIKey: "env-mimo",
+	}), store)
+	if err != nil {
+		t.Fatalf("LoadRuntimeConfigWithCredentials() error = %v", err)
+	}
+	if config.volc.Auth.APIKey != "stored-volc" || config.volc.Auth.ResourceID != "stored-resource" || config.mimo.APIKey != "stored-mimo" {
+		t.Fatalf("stored credentials were not preferred: volc=%+v mimo=%+v", config.volc.Auth, config.mimo)
+	}
+}
+
+func TestLoadRuntimeConfigStoredLegacyVolcCombination(t *testing.T) {
+	store := configStore{values: map[credential.Name]string{
+		credential.VolcAppKey:     "stored-app",
+		credential.VolcAccessKey:  "stored-access",
+		credential.VolcResourceID: "stored-resource",
+		credential.MiMoAPIKey:     "stored-mimo",
+	}}
+	config, err := LoadRuntimeConfigWithCredentials(env(nil), store)
+	if err != nil {
+		t.Fatalf("LoadRuntimeConfigWithCredentials() error = %v", err)
+	}
+	if config.volc.Auth.Mode != volcengine.AuthLegacy || config.volc.Auth.AppKey != "stored-app" || config.volc.Auth.AccessKey != "stored-access" {
+		t.Fatalf("stored legacy auth = %+v", config.volc.Auth)
+	}
+}
+
 func env(values map[string]string) func(string) string {
 	return func(key string) string { return values[key] }
 }
+
+type configStore struct{ values map[credential.Name]string }
+
+func (s configStore) Read(name credential.Name) ([]byte, error) {
+	value, ok := s.values[name]
+	if !ok {
+		return nil, credential.ErrNotFound
+	}
+	return []byte(value), nil
+}
+func (configStore) Write(credential.Name, []byte) error { return credential.ErrStorage }
+func (configStore) Delete(credential.Name) error        { return credential.ErrStorage }

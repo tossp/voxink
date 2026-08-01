@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tossp/voxink/internal/asr"
+	"github.com/tossp/voxink/internal/credential"
 	"github.com/tossp/voxink/internal/provider/mimo"
 	"github.com/tossp/voxink/internal/provider/volcengine"
 )
@@ -40,11 +41,18 @@ type RuntimeConfig struct {
 
 // LoadRuntimeConfig reads stage-one settings without persistence or logging.
 func LoadRuntimeConfig(getenv func(string) string) (RuntimeConfig, error) {
-	volcConfig, volcOverride, readLimit, err := loadVolcengineConfig(getenv)
+	return LoadRuntimeConfigWithCredentials(getenv, nil)
+}
+
+// LoadRuntimeConfigWithCredentials reads Provider credentials from store before
+// falling back to the existing environment variables.
+func LoadRuntimeConfigWithCredentials(getenv func(string) string, store credential.Store) (RuntimeConfig, error) {
+	resolve := credential.Resolver{Store: store, Getenv: getenv}.Get
+	volcConfig, volcOverride, readLimit, err := loadVolcengineConfig(getenv, resolve)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
-	mimoConfig, mimoOverride, err := loadMiMoConfig(getenv)
+	mimoConfig, mimoOverride, err := loadMiMoConfig(getenv, resolve)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
@@ -67,7 +75,13 @@ func LoadRuntimeConfig(getenv func(string) string) (RuntimeConfig, error) {
 // LoadVolcengineConfig reads and validates only the existing Volcengine
 // environment variables. It does not inspect MiMo configuration.
 func LoadVolcengineConfig(getenv func(string) string) (volcengine.Config, error) {
-	config, _, _, err := loadVolcengineConfig(getenv)
+	return LoadVolcengineConfigWithCredentials(getenv, nil)
+}
+
+// LoadVolcengineConfigWithCredentials loads only Volcengine configuration with
+// Credential Manager precedence over environment variables.
+func LoadVolcengineConfigWithCredentials(getenv func(string) string, store credential.Store) (volcengine.Config, error) {
+	config, _, _, err := loadVolcengineConfig(getenv, credential.Resolver{Store: store, Getenv: getenv}.Get)
 	if err != nil {
 		return volcengine.Config{}, err
 	}
@@ -77,7 +91,7 @@ func LoadVolcengineConfig(getenv func(string) string) (volcengine.Config, error)
 	return *config, nil
 }
 
-func loadVolcengineConfig(getenv func(string) string) (*volcengine.Config, bool, int64, error) {
+func loadVolcengineConfig(getenv func(string) string, resolve func(credential.Name) (string, error)) (*volcengine.Config, bool, int64, error) {
 	readLimit := DefaultVolcengineReadLimit
 	if raw := strings.TrimSpace(getenv(envVolcReadLimit)); raw != "" {
 		parsed, err := strconv.ParseInt(raw, 10, 64)
@@ -90,10 +104,22 @@ func loadVolcengineConfig(getenv func(string) string) (*volcengine.Config, bool,
 	if err != nil {
 		return nil, false, 0, err
 	}
-	apiKey := getenv(envVolcAPIKey)
-	resourceID := getenv(envVolcResourceID)
-	appKey := getenv(envVolcAppKey)
-	accessKey := getenv(envVolcAccessKey)
+	apiKey, err := resolve(credential.VolcAPIKey)
+	if err != nil {
+		return nil, false, 0, err
+	}
+	resourceID, err := resolve(credential.VolcResourceID)
+	if err != nil {
+		return nil, false, 0, err
+	}
+	appKey, err := resolve(credential.VolcAppKey)
+	if err != nil {
+		return nil, false, 0, err
+	}
+	accessKey, err := resolve(credential.VolcAccessKey)
+	if err != nil {
+		return nil, false, 0, err
+	}
 	if apiKey != "" && (appKey != "" || accessKey != "") {
 		return nil, false, 0, fmt.Errorf("Volcengine new and legacy credentials are mutually exclusive")
 	}
@@ -120,7 +146,13 @@ func loadVolcengineConfig(getenv func(string) string) (*volcengine.Config, bool,
 // LoadMiMoConfig reads and validates only the existing MiMo environment
 // variables. It does not inspect Volcengine configuration.
 func LoadMiMoConfig(getenv func(string) string) (mimo.Config, error) {
-	config, _, err := loadMiMoConfig(getenv)
+	return LoadMiMoConfigWithCredentials(getenv, nil)
+}
+
+// LoadMiMoConfigWithCredentials loads only MiMo configuration with Credential
+// Manager precedence over the environment variable.
+func LoadMiMoConfigWithCredentials(getenv func(string) string, store credential.Store) (mimo.Config, error) {
+	config, _, err := loadMiMoConfig(getenv, credential.Resolver{Store: store, Getenv: getenv}.Get)
 	if err != nil {
 		return mimo.Config{}, err
 	}
@@ -130,12 +162,15 @@ func LoadMiMoConfig(getenv func(string) string) (mimo.Config, error) {
 	return *config, nil
 }
 
-func loadMiMoConfig(getenv func(string) string) (*mimo.Config, bool, error) {
+func loadMiMoConfig(getenv func(string) string, resolve func(credential.Name) (string, error)) (*mimo.Config, bool, error) {
 	endpoint, override, err := endpointOverride(getenv(envMiMoEndpoint), "MiMo", "http", "https")
 	if err != nil {
 		return nil, false, err
 	}
-	key := getenv(envMiMoAPIKey)
+	key, err := resolve(credential.MiMoAPIKey)
+	if err != nil {
+		return nil, false, err
+	}
 	if key == "" {
 		return nil, override, nil
 	}
