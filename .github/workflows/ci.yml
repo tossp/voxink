@@ -79,18 +79,60 @@ jobs:
       - name: Vet with Windows cgo
         run: go vet ./...
 
-      - name: Build unsigned Windows executable
+      - name: Build unsigned Windows portable bundle
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          go build -trimpath -o dist/voxink-windows-amd64.exe ./cmd/voxink
+          New-Item -ItemType Directory -Force dist/bundle | Out-Null
+          go build -trimpath -ldflags "-H=windowsgui -X=main.buildMode=gui" -o dist/bundle/voxink.exe ./cmd/voxink
+          go build -trimpath -ldflags "-X=main.buildMode=cli" -o dist/bundle/voxink-cli.exe ./cmd/voxink
+          Copy-Item -LiteralPath THIRD_PARTY_NOTICES.md -Destination dist/bundle/THIRD_PARTY_NOTICES.md
 
-      - name: Upload unsigned Windows artifact
+      - name: Verify Windows PE subsystems
+        shell: pwsh
+        run: |
+          $objdump = Join-Path (Split-Path -Parent $env:CC) "objdump.exe"
+          if (-not (Test-Path -LiteralPath $objdump -PathType Leaf)) {
+            throw "MinGW objdump not found at $objdump"
+          }
+          function Assert-Subsystem([string] $path, [string] $expected) {
+            $headers = & $objdump -p $path | Out-String
+            if ($LASTEXITCODE -ne 0) {
+              throw "objdump failed for $path"
+            }
+            $line = @($headers -split "`r?`n" | Where-Object { $_ -match '^\s*Subsystem\s+' })
+            if ($line.Count -ne 1 -or $line[0] -notmatch [regex]::Escape($expected)) {
+              throw "Unexpected PE subsystem for ${path}: $($line -join '; ')"
+            }
+          }
+          Assert-Subsystem "dist/bundle/voxink.exe" "Windows GUI"
+          Assert-Subsystem "dist/bundle/voxink-cli.exe" "Windows CUI"
+
+      - name: Create and verify portable ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/bundle/* -DestinationPath dist/voxink-windows-amd64.zip
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zipPath = (Resolve-Path -LiteralPath dist/voxink-windows-amd64.zip).Path
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            $actual = @($archive.Entries | ForEach-Object { $_.FullName } | Sort-Object)
+            $expected = @("THIRD_PARTY_NOTICES.md", "voxink-cli.exe", "voxink.exe") | Sort-Object
+            $difference = @(Compare-Object -ReferenceObject $expected -DifferenceObject $actual)
+            if ($actual.Count -ne 3 -or $difference.Count -ne 0) {
+              throw "ZIP must contain exactly the three portable bundle files; actual: $($actual -join ', ')"
+            }
+          } finally {
+            $archive.Dispose()
+          }
+
+      - name: Upload unsigned Windows artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: voxink-windows-amd64
           path: |
-            dist/voxink-windows-amd64.exe
-            THIRD_PARTY_NOTICES.md
+            dist/voxink-windows-amd64.zip
+            dist/bundle/voxink.exe
+            dist/bundle/voxink-cli.exe
+            dist/bundle/THIRD_PARTY_NOTICES.md
           if-no-files-found: error
           retention-days: 14

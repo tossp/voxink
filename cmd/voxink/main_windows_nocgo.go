@@ -4,14 +4,13 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/tossp/voxink/internal/platform/windows"
 )
 
 func main() {
-	handleCommand()
-	fmt.Fprintln(os.Stderr, "VoxInk stopped:", windows.ErrCGODisabled)
+	handleCommand(showWindowsMessage)
+	reportStartupError(buildMode, windows.ErrCGODisabled, os.Stderr, showWindowsMessage)
 	os.Exit(1)
 }

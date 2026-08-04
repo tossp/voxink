@@ -14,15 +14,15 @@ VoxInk 是计划中的 Windows 跨应用语音输入工具。
 
 ## 当前状态
 
-最新发布状态及下载资产以 [GitHub Releases](https://github.com/tossp/voxink/releases) 为准。[`v0.1.0-alpha.1`](https://github.com/tossp/voxink/releases/tag/v0.1.0-alpha.1) 可作为已发布历史预览查阅。`v0.1.0-alpha.2` 计划作为 Windows amd64 未签名 console validation bundle，包含分层 self-check、受控 Provider smoke 与第三方 notice 治理；发布前本段不表示该版本已经发布。所有预览都是 prerelease，不是 stable 或正式可用产品。
+最新发布状态及下载资产以 [GitHub Releases](https://github.com/tossp/voxink/releases) 为准。[`v0.1.0-alpha.1`](https://github.com/tossp/voxink/releases/tag/v0.1.0-alpha.1) 可作为已发布历史预览查阅。`v0.1.0-alpha.2` 计划提供 Windows amd64 未签名 portable ZIP，包含托盘程序、CLI、自检与第三方 notices；发布前本段不表示该版本已经发布。所有预览都是 prerelease，不是 stable 或正式可用产品。
 
-当前代码已实现带 `SessionID` 门控的六态会话、500/600 ms 与 15/60 秒切段、火山 live、MiMo batch fallback、Windows WASAPI 采集、默认 `Ctrl+Shift+Space` 热键、no-activate overlay、脱敏诊断和 Linux/Windows CI。当前只有 overlay 展示，仍无文本注入、Clipboard、SQLite、tray、设置 UI、签名或安装器。
+当前代码已实现带 `SessionID` 门控的六态会话、500/600 ms 与 15/60 秒切段、火山 live、MiMo batch fallback、Windows WASAPI 采集、默认 `Ctrl+Shift+Space` 热键、no-activate overlay、托盘控制、脱敏诊断和 Linux/Windows CI。仍无 Clipboard、SQLite、设置 UI、签名或安装器。
 
 `v0.1.0-alpha.2` 的计划能力、隐私边界和已知限制见 [release notes 源](docs/releases/v0.1.0-alpha.2.md)；历史说明见 [v0.1.0-alpha.1](docs/releases/v0.1.0-alpha.1.md)，版本摘要见 [CHANGELOG](CHANGELOG.md)。
 
 ## 预览下载与运行前提
 
-可在 [GitHub Releases](https://github.com/tossp/voxink/releases) 获取未签名的 `voxink-windows-amd64.exe` 及其 `.sha256` 文件；不要把有保留期限的 Actions artifact 当作永久 release。当前没有安装器，请在 Windows x64 上直接运行 exe。
+可在 [GitHub Releases](https://github.com/tossp/voxink/releases) 获取未签名的 `voxink-windows-amd64.zip` 及 release 阶段生成的 `voxink-windows-amd64.zip.sha256`；不要把有保留期限的 Actions artifact 当作永久 release。解压后，无参数运行 `voxink.exe` 启动托盘应用；`config`、`self-check`、`smoke` 等需要控制台输出的子命令必须使用 `voxink-cli.exe`。当前没有安装器、代码签名或自动发布。
 
 运行前需在本机设置环境变量：火山使用 `VOXINK_VOLC_API_KEY` 与 `VOXINK_VOLC_RESOURCE_ID`，MiMo 使用 `VOXINK_MIMO_API_KEY`；火山 legacy 认证可改用 `VOXINK_VOLC_APP_KEY`、`VOXINK_VOLC_ACCESS_KEY` 与 `VOXINK_VOLC_RESOURCE_ID`。不要将任何值写入仓库、issue 或日志。
 
@@ -31,9 +31,9 @@ VoxInk 是计划中的 Windows 跨应用语音输入工具。
 `self-check` 子命令不读取 Provider 凭据，也不调用 Provider。静态报告可在任意开发平台生成；音频与交互探针必须在相应的 Windows 环境运行：
 
 ```text
-voxink self-check --mode=static --json
-voxink self-check --mode=audio --duration=3s --json
-voxink self-check --mode=interactive --timeout=15s --json
+voxink-cli.exe self-check --mode=static --json
+voxink-cli.exe self-check --mode=audio --duration=3s --json
+voxink-cli.exe self-check --mode=interactive --timeout=15s --json
 ```
 
 JSON 只写入 stdout，交互提示与参数错误写入 stderr。报告不会包含 PCM、设备名、窗口标题、路径、环境变量值、识别文本或原始错误；interactive 报告中的 `focus_confirmation_required` 仍须人工确认，不能由程序自动判定。完整说明见[分层自检](docs/self-check.md)。
@@ -43,8 +43,8 @@ JSON 只写入 stdout，交互提示与参数错误写入 stderr。报告不会�
 只有用户明确提供已授权 WAV 并确认发送时，才会运行单一 Provider 冒烟；命令不采集麦克风、不触发 fallback，也不会在普通启动或 CI 中自动执行：
 
 ```text
-voxink smoke volc --audio <authorized.wav> --confirm-send --json
-voxink smoke mimo --audio <authorized.wav> --confirm-send --json
+voxink-cli.exe smoke volc --audio <authorized.wav> --confirm-send --json
+voxink-cli.exe smoke mimo --audio <authorized.wav> --confirm-send --json
 ```
 
 输入限制为 2 MiB、最长 60 秒的 PCM16 LE / 16 kHz / mono WAV。报告不包含路径、音频、识别文本、响应正文、endpoint、凭据或原始错误。真实运行前必须复核账户权限及当期供应商政策；mock 结果不能替代真实账户证据。完整说明见 [Provider 受控冒烟命令](docs/provider-smoke.md)。

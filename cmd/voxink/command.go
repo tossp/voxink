@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 
@@ -11,12 +12,46 @@ import (
 	"github.com/tossp/voxink/internal/smoke"
 )
 
-func handleCommand() {
-	handled, code := dispatchCommand(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+const (
+	buildModeCLI = "cli"
+	buildModeGUI = "gui"
+
+	guiCLIUsageMessage     = "请使用voxink-cli.exe"
+	guiStartupErrorMessage = "VoxInk无法启动。请使用voxink-cli.exe运行self-check。"
+	cliStartupErrorMessage = "VoxInk could not start. Run voxink-cli.exe self-check for safe diagnostics."
+)
+
+// buildMode is set to gui or cli by release build linker flags.
+var buildMode = buildModeCLI
+
+type messagePresenter func(string)
+
+func handleCommand(presentMessage messagePresenter) {
+	handled, code := dispatchCommandForMode(buildMode, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, presentMessage)
 	if !handled {
 		return
 	}
 	os.Exit(code)
+}
+
+func dispatchCommandForMode(mode string, args []string, stdin io.Reader, stdout, stderr io.Writer, presentMessage messagePresenter) (bool, int) {
+	if mode == buildModeGUI && len(args) > 0 {
+		if presentMessage != nil {
+			presentMessage(guiCLIUsageMessage)
+		}
+		return true, 2
+	}
+	return dispatchCommand(args, stdin, stdout, stderr)
+}
+
+func reportStartupError(mode string, _ error, stderr io.Writer, presentMessage messagePresenter) {
+	if mode == buildModeGUI {
+		if presentMessage != nil {
+			presentMessage(guiStartupErrorMessage)
+		}
+		return
+	}
+	fmt.Fprintln(stderr, cliStartupErrorMessage)
 }
 
 func dispatchCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) (bool, int) {

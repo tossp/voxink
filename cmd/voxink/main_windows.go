@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 
@@ -15,16 +14,16 @@ import (
 )
 
 func main() {
-	handleCommand()
+	handleCommand(showWindowsMessage)
 	config, err := app.LoadRuntimeConfigWithSettings(os.Getenv, windows.NewCredentialStore(), settings.NewDefaultStore())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "VoxInk configuration error:", err)
+		reportStartupError(buildMode, err, os.Stderr, showWindowsMessage)
 		os.Exit(1)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if err := app.RunWindows(ctx, config); err != nil {
-		fmt.Fprintln(os.Stderr, "VoxInk stopped:", err)
+		reportStartupError(buildMode, err, os.Stderr, showWindowsMessage)
 		os.Exit(1)
 	}
 }
