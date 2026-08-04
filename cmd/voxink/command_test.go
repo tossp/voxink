@@ -24,6 +24,70 @@ func TestDispatchCommandLeavesNoArgumentsAndUnknownArgumentsUnchanged(t *testing
 	}
 }
 
+func TestGUIBuildRejectsArgumentsBeforeDispatch(t *testing.T) {
+	const canary = "must-not-be-stored"
+	stdin := strings.NewReader(canary + "\n")
+	var stdout, stderr bytes.Buffer
+	var messages []string
+	handled, code := dispatchCommandForMode(
+		buildModeGUI,
+		[]string{"config", "credential", "set", string(credential.MiMoAPIKey)},
+		stdin,
+		&stdout,
+		&stderr,
+		func(message string) { messages = append(messages, message) },
+	)
+	if !handled || code != 2 {
+		t.Fatalf("GUI dispatch = %t/%d", handled, code)
+	}
+	if len(messages) != 1 || messages[0] != guiCLIUsageMessage {
+		t.Fatalf("GUI messages = %q", messages)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 || stdin.Len() != len(canary)+1 {
+		t.Fatalf("GUI dispatch had side effects: stdout=%q stderr=%q unread_stdin=%d", stdout.String(), stderr.String(), stdin.Len())
+	}
+}
+
+func TestCLIBuildPreservesCommandDispatch(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	handled, code := dispatchCommandForMode(
+		buildModeCLI,
+		[]string{"self-check", "--mode=static", "--json"},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		func(string) { t.Fatal("CLI dispatch presented a GUI message") },
+	)
+	if !handled || code != 0 || stdout.Len() == 0 || stderr.Len() != 0 {
+		t.Fatalf("CLI dispatch = %t/%d stdout=%q stderr=%q", handled, code, stdout.String(), stderr.String())
+	}
+}
+
+func TestStartupErrorRoutingUsesFixedRedactedMessages(t *testing.T) {
+	const canary = "credential-and-endpoint-canary"
+	cause := errors.New(canary)
+
+	var guiStderr bytes.Buffer
+	var guiMessages []string
+	reportStartupError(buildModeGUI, cause, &guiStderr, func(message string) {
+		guiMessages = append(guiMessages, message)
+	})
+	if guiStderr.Len() != 0 || len(guiMessages) != 1 || guiMessages[0] != guiStartupErrorMessage {
+		t.Fatalf("GUI startup route: stderr=%q messages=%q", guiStderr.String(), guiMessages)
+	}
+
+	var cliStderr bytes.Buffer
+	reportStartupError(buildModeCLI, cause, &cliStderr, func(string) {
+		t.Fatal("CLI startup route presented a GUI message")
+	})
+	if cliStderr.String() != cliStartupErrorMessage+"\n" {
+		t.Fatalf("CLI startup stderr = %q", cliStderr.String())
+	}
+	if strings.Contains(guiMessages[0]+cliStderr.String(), canary) {
+		t.Fatal("startup error route leaked the raw cause")
+	}
+}
+
 func TestDispatchCommandKeepsSelfCheckCompatible(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	handled, code := dispatchCommand([]string{"self-check", "--mode=static", "--json"}, strings.NewReader(""), &stdout, &stderr)
