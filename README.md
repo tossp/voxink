@@ -14,15 +14,17 @@ VoxInk 是计划中的 Windows 跨应用语音输入工具。
 
 ## 当前状态
 
-最新发布状态及下载资产以 [GitHub Releases](https://github.com/tossp/voxink/releases) 为准。[`v0.1.0-alpha.1`](https://github.com/tossp/voxink/releases/tag/v0.1.0-alpha.1) 可作为已发布历史预览查阅。`v0.1.0-alpha.2` 计划提供 Windows amd64 未签名 portable ZIP，包含托盘程序、CLI、自检与第三方 notices；发布前本段不表示该版本已经发布。所有预览都是 prerelease，不是 stable 或正式可用产品。
+最新发布状态及下载资产以 [GitHub Releases](https://github.com/tossp/voxink/releases) 为准。[`v0.1.0-alpha.1`](https://github.com/tossp/voxink/releases/tag/v0.1.0-alpha.1) 可作为已发布历史预览查阅。后续预览构建可提供 Windows amd64 未签名安装器和 portable ZIP，均包含托盘程序、CLI、自检与第三方 notices；本段不表示尚未列入 Release 的资产已经发布。所有预览都是 prerelease，不是 stable 或正式可用产品。
 
-当前代码已实现带 `SessionID` 门控的六态会话、500/600 ms 与 15/60 秒切段、火山 live、MiMo batch fallback、Windows WASAPI 采集、默认 `Ctrl+Shift+Space` 热键、no-activate overlay、托盘控制、脱敏诊断和 Linux/Windows CI。仍无 Clipboard、SQLite、设置 UI、签名或安装器。
+当前代码已实现带 `SessionID` 门控的六态会话、500/600 ms 与 15/60 秒切段、火山 live、MiMo batch fallback、Windows WASAPI 采集、默认 `Ctrl+Shift+Space` 热键、no-activate overlay、托盘控制、脱敏诊断、Windows per-user 安装器和 Linux/Windows CI。仍无 Clipboard、SQLite、设置 UI、签名或自动更新。
 
 `v0.1.0-alpha.2` 的计划能力、隐私边界和已知限制见 [release notes 源](docs/releases/v0.1.0-alpha.2.md)；历史说明见 [v0.1.0-alpha.1](docs/releases/v0.1.0-alpha.1.md)，版本摘要见 [CHANGELOG](CHANGELOG.md)。
 
-## 预览下载与运行前提
+## 预览下载、安装与运行前提
 
-可在 [GitHub Releases](https://github.com/tossp/voxink/releases) 获取未签名的 `voxink-windows-amd64.zip` 及 release 阶段生成的 `voxink-windows-amd64.zip.sha256`；不要把有保留期限的 Actions artifact 当作永久 release。解压后，无参数运行 `voxink.exe` 启动托盘应用；`config`、`self-check`、`smoke` 等需要控制台输出的子命令必须使用 `voxink-cli.exe`。当前没有安装器、代码签名或自动发布。
+资产可用时，选择 `voxink-windows-amd64-setup.exe` 进行当前用户安装，或选择 `voxink-windows-amd64.zip` 解压后 portable 运行；不要把有保留期限的 Actions artifact 当作永久 release。两种形式均未签名，Windows SmartScreen 可能显示警告或阻止运行。无参数运行 `voxink.exe` 启动托盘应用；`config`、`self-check`、`smoke` 等需要控制台输出的子命令必须使用 `voxink-cli.exe`。
+
+安装器默认安装到 `%LocalAppData%\Programs\VoxInk`，不会要求管理员权限；桌面快捷方式是可选项且默认不创建。卸载只删除程序文件和快捷方式，刻意保留 `%AppData%\VoxInk` 用户设置及 Windows Credential Manager 中的 `VoxInk/*` 凭据，避免数据损失；如需清理凭据，请在卸载前使用 CLI 或之后通过 Windows 凭据管理器手动删除。
 
 运行前需在本机设置环境变量：火山使用 `VOXINK_VOLC_API_KEY` 与 `VOXINK_VOLC_RESOURCE_ID`，MiMo 使用 `VOXINK_MIMO_API_KEY`；火山 legacy 认证可改用 `VOXINK_VOLC_APP_KEY`、`VOXINK_VOLC_ACCESS_KEY` 与 `VOXINK_VOLC_RESOURCE_ID`。不要将任何值写入仓库、issue 或日志。
 

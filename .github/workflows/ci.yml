@@ -125,11 +125,105 @@ jobs:
             $archive.Dispose()
           }
 
+      - name: Compile unsigned Windows installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) {
+            $isccCommand = Get-Command ISCC.exe -CommandType Application -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($null -eq $isccCommand) {
+              throw "Inno Setup 6 ISCC.exe is not available on windows-2025; CI will not download or install it"
+            }
+            $iscc = $isccCommand.Path
+          }
+          & $iscc "/DAppVersion=0.0.0-dev" "build/windows/voxink.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "ISCC failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Verify installer PE
+        shell: pwsh
+        run: |
+          $setupPath = "dist/voxink-windows-amd64-setup.exe"
+          if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) {
+            throw "Installer not found at $setupPath"
+          }
+          $resolvedSetupPath = (Resolve-Path -LiteralPath $setupPath).Path
+          $bytes = [System.IO.File]::ReadAllBytes($resolvedSetupPath)
+          if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) {
+            throw "Installer does not have a valid DOS/PE header"
+          }
+          $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3c)
+          if ($peOffset -lt 0 -or $peOffset + 4 -gt $bytes.Length -or
+              $bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or
+              $bytes[$peOffset + 2] -ne 0 -or $bytes[$peOffset + 3] -ne 0) {
+            throw "Installer does not have a valid PE signature"
+          }
+
+      - name: Install, self-check, and uninstall
+        shell: pwsh
+        run: |
+          $setupPath = (Resolve-Path -LiteralPath "dist/voxink-windows-amd64-setup.exe").Path
+          $installDir = Join-Path $env:RUNNER_TEMP "VoxInkInstall"
+          $install = Start-Process -FilePath $setupPath -ArgumentList @(
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/SP-",
+            "/DIR=$installDir"
+          ) -Wait -PassThru
+          if ($install.ExitCode -ne 0) {
+            throw "Silent install failed with exit code $($install.ExitCode)"
+          }
+
+          $expectedFiles = @("voxink.exe", "voxink-cli.exe", "THIRD_PARTY_NOTICES.md")
+          foreach ($name in $expectedFiles) {
+            $path = Join-Path $installDir $name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Installed file not found: $path"
+            }
+          }
+
+          $cliPath = Join-Path $installDir "voxink-cli.exe"
+          $json = & $cliPath self-check --mode=static --json | Out-String
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installed voxink-cli.exe self-check failed with exit code $LASTEXITCODE"
+          }
+          $report = $json | ConvertFrom-Json -ErrorAction Stop
+          if ([string]$report.SchemaVersion -ne "1") {
+            throw "Unexpected self-check SchemaVersion: $($report.SchemaVersion)"
+          }
+          $failures = @($report.Checks | Where-Object { $_.Status -eq "fail" })
+          if ($failures.Count -ne 0) {
+            throw "Installed self-check reported failures: $($failures.Name -join ', ')"
+          }
+
+          $uninstallers = @(Get-ChildItem -LiteralPath $installDir -Filter "unins*.exe" -File)
+          if ($uninstallers.Count -ne 1) {
+            throw "Expected one Inno Setup uninstaller, found $($uninstallers.Count)"
+          }
+          $uninstall = Start-Process -FilePath $uninstallers[0].FullName -ArgumentList @(
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART"
+          ) -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) {
+            throw "Silent uninstall failed with exit code $($uninstall.ExitCode)"
+          }
+          foreach ($name in $expectedFiles) {
+            $path = Join-Path $installDir $name
+            if (Test-Path -LiteralPath $path) {
+              throw "Uninstall left program file behind: $path"
+            }
+          }
+
       - name: Upload unsigned Windows artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: voxink-windows-amd64
           path: |
+            dist/voxink-windows-amd64-setup.exe
             dist/voxink-windows-amd64.zip
             dist/bundle/voxink.exe
             dist/bundle/voxink-cli.exe
