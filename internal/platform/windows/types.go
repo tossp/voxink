@@ -16,6 +16,7 @@ const (
 	updateQueueSize = 8
 	toggleQueueSize = 1
 	exitQueueSize   = 1
+	windowQueueSize = 1
 	maxViewRunes    = 512
 	maxNoticeRunes  = 256
 )
@@ -69,6 +70,11 @@ type View struct {
 	Final   string
 	Error   string
 	Notice  string
+}
+
+type hotkeyRequest struct {
+	hotkey Hotkey
+	reply  chan error
 }
 
 type captureIngress struct {
@@ -151,20 +157,25 @@ func truncateRunes(text string, limit int) string {
 
 // Overlay owns the stage-one no-activate window and its global toggle hotkey.
 type Overlay struct {
-	updates chan View
-	toggles chan struct{}
-	exits   chan struct{}
-	done    chan struct{}
+	updates        chan View
+	toggles        chan struct{}
+	exits          chan struct{}
+	opens          chan struct{}
+	settings       chan struct{}
+	done           chan struct{}
+	hotkeyRequests chan hotkeyRequest
 
 	viewMu sync.RWMutex
 	view   View
 
-	running atomic.Bool
-	closing atomic.Bool
-	hwnd    atomic.Uintptr
-	hotkey  Hotkey
-	trayOn  bool
-	tray    *trayRuntime
+	running        atomic.Bool
+	closing        atomic.Bool
+	hwnd           atomic.Uintptr
+	hotkeyMu       sync.RWMutex
+	hotkeyUpdateMu sync.Mutex
+	hotkey         Hotkey
+	trayOn         bool
+	tray           *trayRuntime
 }
 
 // NewOverlay creates an idle overlay adapter. Run performs platform initialization.
@@ -188,13 +199,16 @@ func NewRuntimeOverlayWithHotkey(hotkey Hotkey) *Overlay {
 
 func newOverlay(hotkey Hotkey, trayOn bool) *Overlay {
 	return &Overlay{
-		updates: make(chan View, updateQueueSize),
-		toggles: make(chan struct{}, toggleQueueSize),
-		exits:   make(chan struct{}, exitQueueSize),
-		done:    make(chan struct{}),
-		view:    View{Status: ViewIdle},
-		hotkey:  hotkey,
-		trayOn:  trayOn,
+		updates:        make(chan View, updateQueueSize),
+		toggles:        make(chan struct{}, toggleQueueSize),
+		exits:          make(chan struct{}, exitQueueSize),
+		opens:          make(chan struct{}, windowQueueSize),
+		settings:       make(chan struct{}, windowQueueSize),
+		done:           make(chan struct{}),
+		hotkeyRequests: make(chan hotkeyRequest, 1),
+		view:           View{Status: ViewIdle},
+		hotkey:         hotkey,
+		trayOn:         trayOn,
 	}
 }
 
@@ -225,6 +239,27 @@ func (o *Overlay) Toggles() <-chan struct{} { return o.toggles }
 // Exits returns non-blocking requests to shut down the application.
 func (o *Overlay) Exits() <-chan struct{} { return o.exits }
 
+// OpenMainRequests returns native tray requests to show the main window.
+func (o *Overlay) OpenMainRequests() <-chan struct{} { return o.opens }
+
+// OpenSettingsRequests returns native tray requests to show settings.
+func (o *Overlay) OpenSettingsRequests() <-chan struct{} { return o.settings }
+
+// RequestToggle submits the same bounded toggle used by the native hotkey.
+func (o *Overlay) RequestToggle() { o.emitToggle() }
+
+func (o *Overlay) currentHotkey() Hotkey {
+	o.hotkeyMu.RLock()
+	defer o.hotkeyMu.RUnlock()
+	return o.hotkey
+}
+
+func (o *Overlay) setHotkey(hotkey Hotkey) {
+	o.hotkeyMu.Lock()
+	o.hotkey = hotkey
+	o.hotkeyMu.Unlock()
+}
+
 func (o *Overlay) setView(view View) {
 	o.viewMu.Lock()
 	o.view = normalizeView(view)
@@ -247,6 +282,13 @@ func (o *Overlay) emitToggle() {
 func (o *Overlay) emitExit() {
 	select {
 	case o.exits <- struct{}{}:
+	default:
+	}
+}
+
+func emitWindowRequest(target chan<- struct{}) {
+	select {
+	case target <- struct{}{}:
 	default:
 	}
 }
