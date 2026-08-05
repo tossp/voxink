@@ -22,6 +22,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Install Fyne Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            pkg-config libgl1-mesa-dev xorg-dev \
+            libwayland-dev libxkbcommon-dev wayland-protocols
+
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,6 +43,9 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Compile Fyne UI and test its model
+        run: go test -tags=fyne_gui ./internal/ui
 
       - name: Test with race detector
         run: go test -race ./...

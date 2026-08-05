@@ -11,8 +11,20 @@ import (
 	"github.com/tossp/voxink/internal/provider/volcengine"
 )
 
+// WindowsOptions provides desktop UI bridges without coupling app to Fyne.
+type WindowsOptions struct {
+	History       HistoryStore
+	RuntimeEvents chan<- RuntimeEvent
+	Control       *RuntimeControl
+}
+
 // RunWindows constructs the stage-one Windows adapters and runs the coordinator.
 func RunWindows(ctx context.Context, config RuntimeConfig) error {
+	return RunWindowsWithOptions(ctx, config, WindowsOptions{})
+}
+
+// RunWindowsWithOptions constructs and runs the Windows adapters with UI bridges.
+func RunWindowsWithOptions(ctx context.Context, config RuntimeConfig, options WindowsOptions) error {
 	if err := config.validateStageOne(); err != nil {
 		return err
 	}
@@ -37,13 +49,38 @@ func RunWindows(ctx context.Context, config RuntimeConfig) error {
 		return fmt.Errorf("initialize Windows output: %w", outputErr)
 	}
 	overlay := windows.NewRuntimeOverlayWithHotkey(config.hotkey)
-	coordinator, err := NewCoordinator(capture, windowsOverlay{overlay}, client, transcriber, Options{Output: textOutput})
+	if options.Control != nil {
+		if err := options.Control.attach(overlay); err != nil {
+			_ = capture.Close()
+			_ = overlay.Close()
+			return err
+		}
+		defer options.Control.detach(overlay)
+	}
+	forwardContext, cancelForward := context.WithCancel(ctx)
+	defer cancelForward()
+	go forwardWindowAction(forwardContext, overlay.OpenMainRequests(), options.RuntimeEvents, ActionOpenMain)
+	go forwardWindowAction(forwardContext, overlay.OpenSettingsRequests(), options.RuntimeEvents, ActionOpenSettings)
+	coordinator, err := NewCoordinator(capture, windowsOverlay{overlay}, client, transcriber, Options{
+		Output: textOutput, History: options.History, RuntimeEvents: options.RuntimeEvents,
+	})
 	if err != nil {
 		_ = capture.Close()
 		_ = overlay.Close()
 		return err
 	}
 	return coordinator.Run(ctx)
+}
+
+func forwardWindowAction(ctx context.Context, source <-chan struct{}, target chan<- RuntimeEvent, action RuntimeAction) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-source:
+			sendRuntimeEvent(target, RuntimeEvent{Action: action})
+		}
+	}
 }
 
 type windowsOverlay struct {

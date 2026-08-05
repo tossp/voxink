@@ -1,7 +1,7 @@
 # VoxInk repository instructions
 
 ## Current boundary
-- Module: `github.com/tossp/voxink`; `go.mod` declares Go `1.26.3` and no dependencies.
+- Module: `github.com/tossp/voxink`; `go.mod` declares Go `1.26.3` with direct dependencies on Fyne v2, coder/websocket, malgo, and x/sys.
 - This repository is in the design-and-scaffold stage, not a functioning desktop voice-input application.
 - Recording, ASR network calls, Windows text injection, tray support, and GUI are not implemented.
 - Treat capabilities described in `README.md` as design targets unless implementation code establishes otherwise.

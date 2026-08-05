@@ -11,6 +11,7 @@ import (
 	"github.com/tossp/voxink/internal/audio"
 	"github.com/tossp/voxink/internal/diagnostic"
 	"github.com/tossp/voxink/internal/domain"
+	"github.com/tossp/voxink/internal/history"
 	"github.com/tossp/voxink/internal/output"
 	"github.com/tossp/voxink/internal/session"
 )
@@ -312,6 +313,7 @@ func (c *Coordinator) finalize(current *activeSession, text string) {
 		c.failActive("Session finalization failed", diagnostic.StageDelivery, diagnostic.CodeStateRejected)
 		return
 	}
+	c.publishRuntimeStatus(StatusDelivering)
 	result := output.Result{Mode: output.ModeInjected}
 	if current.output != nil {
 		result = current.output.Deliver(text)
@@ -323,6 +325,7 @@ func (c *Coordinator) finalize(current *activeSession, text string) {
 	case output.ModeCopied:
 		message = OutputCopiedMessage
 	default:
+		c.retainHistory(current, text, history.ModeFailed)
 		c.failActive("Output failed", diagnostic.StageDelivery, "")
 		return
 	}
@@ -331,8 +334,29 @@ func (c *Coordinator) finalize(current *activeSession, text string) {
 		return
 	}
 	c.recordDiagnostic(current, diagnostic.KindSessionCompleted, diagnostic.StageDelivery, "", "")
+	mode := history.ModeInjected
+	if result.Mode == output.ModeCopied {
+		mode = history.ModeCopied
+	}
+	c.retainHistory(current, text, mode)
 	c.publish(View{Status: ViewIdle, Final: message})
 	c.cleanupSession(current)
+}
+
+func (c *Coordinator) retainHistory(current *activeSession, text string, mode history.Mode) {
+	provider := domain.ProviderVolcengineV3
+	if current.fallback {
+		provider = domain.ProviderMiMoASR
+	}
+	now := time.Now
+	if c.options.Now != nil {
+		now = c.options.Now
+	}
+	entry := history.Entry{Time: now().UTC(), Provider: provider, Mode: mode, Final: text}
+	if c.history != nil {
+		_ = c.history.Append(entry)
+	}
+	sendRuntimeEvent(c.events, RuntimeEvent{History: &entry})
 }
 
 func (c *Coordinator) failActive(message string, stage diagnostic.Stage, code diagnostic.Code) {

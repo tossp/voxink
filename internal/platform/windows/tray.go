@@ -3,9 +3,11 @@ package windows
 import "errors"
 
 const (
-	trayIconID       = 1
-	trayMenuToggleID = 1001
-	trayMenuExitID   = 1002
+	trayIconID         = 1
+	trayMenuToggleID   = 1001
+	trayMenuOpenID     = 1002
+	trayMenuSettingsID = 1003
+	trayMenuExitID     = 1004
 
 	trayLeftDoubleClick = 0x0203
 	trayRightButtonUp   = 0x0205
@@ -16,6 +18,8 @@ type trayAction uint8
 const (
 	trayActionNone trayAction = iota
 	trayActionToggle
+	trayActionOpen
+	trayActionSettings
 	trayActionExit
 	trayActionMenu
 )
@@ -105,6 +109,10 @@ func trayCommandAction(command uint32) trayAction {
 	switch command {
 	case trayMenuToggleID:
 		return trayActionToggle
+	case trayMenuOpenID:
+		return trayActionOpen
+	case trayMenuSettingsID:
+		return trayActionSettings
 	case trayMenuExitID:
 		return trayActionExit
 	default:
@@ -151,6 +159,12 @@ func popupTrayMenu(api trayMenuAPI, hwnd uintptr, toggleText string) (command ui
 	}
 	defer func() { err = errors.Join(err, api.Destroy(menu)) }()
 	if err := api.Append(menu, trayMenuToggleID, toggleText); err != nil {
+		return 0, err
+	}
+	if err := api.Append(menu, trayMenuOpenID, "打开 VoxInk"); err != nil {
+		return 0, err
+	}
+	if err := api.Append(menu, trayMenuSettingsID, "设置"); err != nil {
 		return 0, err
 	}
 	if err := api.Append(menu, trayMenuExitID, "退出"); err != nil {

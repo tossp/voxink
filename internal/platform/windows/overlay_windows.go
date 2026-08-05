@@ -27,6 +27,7 @@ const (
 	wmMouseActivate = 0x0021
 	wmAppUpdate     = 0x8001
 	wmTrayCallback  = 0x8002
+	wmAppHotkey     = 0x8003
 
 	maNoActivate     = 3
 	swShowNoActivate = 4
@@ -147,7 +148,8 @@ func (o *Overlay) Run() (runErr error) {
 		return ErrOverlayClosed
 	}
 
-	registered, _, registerErr := procRegisterHotKey.Call(uintptr(hwnd), hotkeyID, uintptr(o.hotkey.Modifiers()), uintptr(o.hotkey.VirtualKey()))
+	hotkey := o.currentHotkey()
+	registered, _, registerErr := procRegisterHotKey.Call(uintptr(hwnd), hotkeyID, uintptr(hotkey.Modifiers()), uintptr(hotkey.VirtualKey()))
 	if registered == 0 {
 		procDestroyWindow.Call(uintptr(hwnd))
 		return fmt.Errorf("%w: %v", ErrHotkeyUnavailable, registerErr)
@@ -188,6 +190,42 @@ func (o *Overlay) Run() (runErr error) {
 		}
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		procDispatchMessage.Call(uintptr(unsafe.Pointer(&msg)))
+	}
+}
+
+// UpdateHotkey re-registers the global shortcut on the Overlay message thread.
+func (o *Overlay) UpdateHotkey(hotkey Hotkey) error {
+	o.hotkeyUpdateMu.Lock()
+	defer o.hotkeyUpdateMu.Unlock()
+	if o.closing.Load() {
+		return ErrOverlayClosed
+	}
+	if !o.running.Load() {
+		o.setHotkey(hotkey)
+		return nil
+	}
+	hwnd := o.hwnd.Load()
+	if hwnd == 0 {
+		return ErrHotkeyUnavailable
+	}
+	request := hotkeyRequest{hotkey: hotkey, reply: make(chan error, 1)}
+	select {
+	case o.hotkeyRequests <- request:
+	case <-o.done:
+		return ErrOverlayClosed
+	}
+	if posted, _, _ := procPostMessage.Call(hwnd, wmAppHotkey, 0, 0); posted == 0 {
+		select {
+		case <-o.hotkeyRequests:
+		default:
+		}
+		return ErrHotkeyUnavailable
+	}
+	select {
+	case err := <-request.reply:
+		return err
+	case <-o.done:
+		return ErrOverlayClosed
 	}
 }
 
@@ -261,12 +299,21 @@ func overlayWindowProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uin
 		}
 		procInvalidateRect.Call(hwnd, 0, 0)
 		return 0
+	case wmAppHotkey:
+		if overlay != nil {
+			overlay.applyHotkey(hwnd)
+		}
+		return 0
 	case wmTrayCallback:
 		if overlay != nil && overlay.tray != nil && uint32(wParam) == trayIconID {
 			action, _ := overlay.tray.HandleNotification(uint32(lParam))
 			switch action {
 			case trayActionToggle:
 				overlay.emitToggle()
+			case trayActionOpen:
+				emitWindowRequest(overlay.opens)
+			case trayActionSettings:
+				emitWindowRequest(overlay.settings)
 			case trayActionExit:
 				overlay.emitExit()
 			}
@@ -294,6 +341,23 @@ func overlayWindowProc(hwnd uintptr, message uint32, wParam, lParam uintptr) uin
 	}
 	result, _, _ := procDefWindowProc.Call(hwnd, uintptr(message), wParam, lParam)
 	return result
+}
+
+func (o *Overlay) applyHotkey(hwnd uintptr) {
+	select {
+	case request := <-o.hotkeyRequests:
+		previous := o.currentHotkey()
+		procUnregisterHotKey.Call(hwnd, hotkeyID)
+		registered, _, _ := procRegisterHotKey.Call(hwnd, hotkeyID, uintptr(request.hotkey.Modifiers()), uintptr(request.hotkey.VirtualKey()))
+		if registered == 0 {
+			procRegisterHotKey.Call(hwnd, hotkeyID, uintptr(previous.Modifiers()), uintptr(previous.VirtualKey()))
+			request.reply <- ErrHotkeyUnavailable
+			return
+		}
+		o.setHotkey(request.hotkey)
+		request.reply <- nil
+	default:
+	}
 }
 
 func (o *Overlay) paint(hwnd windows.Handle) {

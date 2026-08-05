@@ -48,6 +48,12 @@ func TestTrayMessageMapping(t *testing.T) {
 	if got := trayCommandAction(trayMenuToggleID); got != trayActionToggle {
 		t.Fatalf("toggle command action = %v", got)
 	}
+	if got := trayCommandAction(trayMenuOpenID); got != trayActionOpen {
+		t.Fatalf("open command action = %v", got)
+	}
+	if got := trayCommandAction(trayMenuSettingsID); got != trayActionSettings {
+		t.Fatalf("settings command action = %v", got)
+	}
 	if got := trayCommandAction(trayMenuExitID); got != trayActionExit {
 		t.Fatalf("exit command action = %v", got)
 	}

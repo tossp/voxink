@@ -55,13 +55,18 @@ func TestTrayRuntimeAddUpdateActionsAndIdempotentDelete(t *testing.T) {
 	}
 }
 
-func TestPopupTrayMenuAlwaysDestroysExactlyTwoItemMenu(t *testing.T) {
+func TestPopupTrayMenuAlwaysDestroysCompleteMenu(t *testing.T) {
 	api := &fakeTrayMenuAPI{command: trayMenuExitID}
 	command, err := popupTrayMenu(api, 9, "开始")
 	if err != nil || command != trayMenuExitID {
 		t.Fatalf("popupTrayMenu() = (%d, %v)", command, err)
 	}
-	want := []fakeMenuItem{{trayMenuToggleID, "开始"}, {trayMenuExitID, "退出"}}
+	want := []fakeMenuItem{
+		{trayMenuToggleID, "开始"},
+		{trayMenuOpenID, "打开 VoxInk"},
+		{trayMenuSettingsID, "设置"},
+		{trayMenuExitID, "退出"},
+	}
 	if !reflect.DeepEqual(api.items, want) || api.destroyed != 1 {
 		t.Fatalf("items/destroyed = (%v, %d), want (%v, 1)", api.items, api.destroyed, want)
 	}

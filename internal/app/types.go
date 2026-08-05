@@ -4,10 +4,12 @@ package app
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/tossp/voxink/internal/asr"
 	"github.com/tossp/voxink/internal/diagnostic"
 	"github.com/tossp/voxink/internal/domain"
+	"github.com/tossp/voxink/internal/history"
 	"github.com/tossp/voxink/internal/output"
 )
 
@@ -87,12 +89,20 @@ type SessionIDGenerator func() (domain.SessionID, error)
 // SpeechDetector labels a complete PCM callback frame for the segmenter.
 type SpeechDetector func([]byte) bool
 
+// HistoryStore is the write-only local history boundary used by Coordinator.
+type HistoryStore interface {
+	Append(history.Entry) error
+}
+
 // Options contains local coordinator policies and test seams.
 type Options struct {
 	NewSessionID   SessionIDGenerator
 	DetectSpeech   SpeechDetector
 	DiagnosticSink diagnostic.Sink
 	Output         output.Adapter
+	History        HistoryStore
+	RuntimeEvents  chan<- RuntimeEvent
+	Now            func() time.Time
 	WorkerBuffer   int
 	LivePCMBuffer  int
 }
@@ -106,11 +116,14 @@ type Coordinator struct {
 	output  output.Adapter
 	options Options
 
-	controller  sessionController
-	active      *activeSession
-	workers     chan workerEvent
-	view        View
-	diagnostics diagnostic.Sink
+	controller    sessionController
+	active        *activeSession
+	workers       chan workerEvent
+	view          View
+	diagnostics   diagnostic.Sink
+	history       HistoryStore
+	events        chan<- RuntimeEvent
+	runtimeStatus RuntimeStatus
 }
 
 // sessionController is the subset kept private to emphasize single-owner use.
@@ -150,9 +163,13 @@ func NewCoordinator(capture Capture, overlay Overlay, live asr.LiveRecognizer, b
 	if options.DiagnosticSink == nil {
 		options.DiagnosticSink = diagnostic.NoopSink()
 	}
+	if options.Now == nil {
+		options.Now = time.Now
+	}
 	return &Coordinator{
 		capture: capture, overlay: overlay, live: live, batch: batch, output: options.Output,
 		options: options, workers: make(chan workerEvent, options.WorkerBuffer), diagnostics: options.DiagnosticSink,
+		history: options.History, events: options.RuntimeEvents,
 	}, nil
 }
 
@@ -204,4 +221,26 @@ func (c *Coordinator) publish(view View) {
 	}
 	c.view = view
 	c.overlay.Update(view)
+	status := StatusIdle
+	switch view.Status {
+	case ViewListening:
+		status = StatusCapturing
+	case ViewTranscribing:
+		status = StatusTranscribing
+	case ViewError:
+		status = StatusFailed
+	case ViewIdle:
+		if view.Final != "" {
+			status = StatusStopped
+		}
+	}
+	c.publishRuntimeStatus(status)
+}
+
+func (c *Coordinator) publishRuntimeStatus(status RuntimeStatus) {
+	if c.runtimeStatus == status {
+		return
+	}
+	c.runtimeStatus = status
+	sendRuntimeEvent(c.events, RuntimeEvent{Status: status})
 }
