@@ -28,8 +28,8 @@ func TestCoordinatorPublishesRuntimeStatesAndHistory(t *testing.T) {
 	live.reads <- fakeLiveRead{event: asr.LiveEvent{Text: "final-canary", ProtocolTerminal: true}}
 	waitView(t, harness.overlay, func(view View) bool { return view.Final != "" }, "final")
 
-	got := drainRuntimeEvents(events)
 	wantStates := []RuntimeStatus{StatusIdle, StatusCapturing, StatusTranscribing, StatusDelivering, StatusStopped}
+	got := waitRuntimeEvents(events, wantStates, 2*time.Second)
 	var states []RuntimeStatus
 	var entry *history.Entry
 	for _, event := range got {
@@ -103,4 +103,26 @@ func drainRuntimeEvents(events <-chan RuntimeEvent) []RuntimeEvent {
 			return result
 		}
 	}
+}
+
+func waitRuntimeEvents(events <-chan RuntimeEvent, wantStates []RuntimeStatus, timeout time.Duration) []RuntimeEvent {
+	waiting := make(map[RuntimeStatus]struct{}, len(wantStates))
+	for _, status := range wantStates {
+		waiting[status] = struct{}{}
+	}
+
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	var result []RuntimeEvent
+	for len(waiting) > 0 {
+		select {
+		case event := <-events:
+			result = append(result, event)
+			delete(waiting, event.Status)
+		case <-deadline.C:
+			return result
+		}
+	}
+	return result
 }
